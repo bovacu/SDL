@@ -1,4 +1,10 @@
-build/
+build/osx/*
+!build/osx/libSDL3.dylib
+build/windows/*
+!build/windows/libSDL3.lib
+!build/windows/libSDL3.dll
+build/linux/*
+!build/linux/libSDL3.so
 build-*/
 !build-scripts/
 buildbot/

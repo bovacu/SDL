@@ -1,0 +1,12 @@
+
+
+
+
+
+Mac:
+cmake -DCMAKE_BUILD_TYPE=Release -S. -Bbuild/osx
+cd build/osx
+make
+rm libSDL3.dylib
+install_name_tool -id libSDL3.dylib libSDL3*.dylib
+mv libSDL3*.dylib libSDL3.dylib
