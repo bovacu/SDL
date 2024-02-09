@@ -1,6 +1,9 @@
+Windows:
+cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -S. -Bbuild\windows
+cd build/windows
+cmake --build .
 
-
-
+Linux:
 
 
 Mac:

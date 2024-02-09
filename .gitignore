@@ -1,8 +1,8 @@
 build/osx/*
 !build/osx/libSDL3.dylib
 build/windows/*
-!build/windows/libSDL3.lib
-!build/windows/libSDL3.dll
+!build/windows/SDL3.dll
+!build/windows/SDL3.lib
 build/linux/*
 !build/linux/libSDL3.so
 build-*/
