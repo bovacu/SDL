@@ -469,6 +469,10 @@ GetNumFormats(SDL_VideoCaptureDevice *_this)
     camera_status_t res;
     int i;
     int unknown = 0;
+
+#if !DEBUG_VIDEO_CAPTURE_CAPTURE
+    (void)unknown;
+#endif
     ACameraMetadata *metadata;
     ACameraMetadata_const_entry entry;
 

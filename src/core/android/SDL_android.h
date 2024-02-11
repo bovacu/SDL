@@ -131,6 +131,8 @@ SDL_bool Android_JNI_RequestPermission(const char *permission);
 /* Show toast notification */
 int Android_JNI_ShowToast(const char *message, int duration, int gravity, int xOffset, int yOffset);
 
+void* SDL_AndroidGetNativeWindow(void);
+
 int Android_JNI_OpenURL(const char *url);
 
 int SDL_GetAndroidSDKVersion(void);

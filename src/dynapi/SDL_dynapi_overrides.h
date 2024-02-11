@@ -40,6 +40,7 @@
 #define SDL_AndroidRequestPermission    SDL_AndroidRequestPermission_REAL
 #define SDL_AndroidSendMessage  SDL_AndroidSendMessage_REAL
 #define SDL_AndroidShowToast    SDL_AndroidShowToast_REAL
+#define SDL_AndroidGetNativeWindow SDL_AndroidGetNativeWindow_REAL
 #define SDL_AtomicAdd SDL_AtomicAdd_REAL
 #define SDL_AtomicCompareAndSwap SDL_AtomicCompareAndSwap_REAL
 #define SDL_AtomicCompareAndSwapPointer SDL_AtomicCompareAndSwapPointer_REAL

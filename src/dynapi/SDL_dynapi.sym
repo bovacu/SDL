@@ -16,6 +16,7 @@ SDL3_0.0.0 {
     SDL_AndroidRequestPermission;
     SDL_AndroidSendMessage;
     SDL_AndroidShowToast;
+    SDL_AndroidGetNativeWindow;
     SDL_AtomicAdd;
     SDL_AtomicCompareAndSwap;
     SDL_AtomicCompareAndSwapPointer;
