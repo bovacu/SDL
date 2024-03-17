@@ -1,0 +1,9 @@
+Windows:
+cmake -DCMAKE_BUILD_TYPE=Release -S. -B./build
+
+Mac:
+cmake -DCMAKE_BUILD_TYPE=Release -S. -B./build
+
+Linux:
+sudo apt-get install libasound2-dev libpulse-dev
+cmake -DCMAKE_BUILD_TYPE=Release -DSDL_WAYLAND=OFF -S. -B./build
