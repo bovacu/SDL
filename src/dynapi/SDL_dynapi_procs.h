@@ -46,63 +46,8 @@ SDL_DYNAPI_PROC(int,SDL_sscanf,(const char *a, SDL_SCANF_FORMAT_STRING const cha
 SDL_DYNAPI_PROC(int,SDL_swprintf,(SDL_OUT_Z_CAP(b) wchar_t *a, size_t b, SDL_PRINTF_FORMAT_STRING const wchar_t *c, ...),(a,b,c),return)
 #endif
 
-#ifdef SDL_CreateThread
-#undef SDL_CreateThread
-#endif
-
-#if defined(SDL_PLATFORM_WIN32) || defined(SDL_PLATFORM_GDK)
-SDL_DYNAPI_PROC(SDL_Thread*,SDL_CreateThread,(SDL_ThreadFunction a, const char *b, void *c, pfnSDL_CurrentBeginThread d, pfnSDL_CurrentEndThread e),(a,b,c,d,e),return)
-#else
-SDL_DYNAPI_PROC(SDL_Thread*,SDL_CreateThread,(SDL_ThreadFunction a, const char *b, void *c),(a,b,c),return)
-#endif
-
-#ifdef SDL_CreateThreadWithStackSize
-#undef SDL_CreateThreadWithStackSize
-#endif
-
-#if defined(SDL_PLATFORM_WIN32) || defined(SDL_PLATFORM_GDK)
-SDL_DYNAPI_PROC(SDL_Thread*,SDL_CreateThreadWithStackSize,(SDL_ThreadFunction a, const char *b, const size_t c, void *d, pfnSDL_CurrentBeginThread e, pfnSDL_CurrentEndThread f),(a,b,c,d,e,f),return)
-#else
-SDL_DYNAPI_PROC(SDL_Thread*,SDL_CreateThreadWithStackSize,(SDL_ThreadFunction a, const char *b, const size_t c, void *d),(a,b,c,d),return)
-#endif
-
-SDL_DYNAPI_PROC(int,SDL_RegisterApp,(const char *a, Uint32 b, void *c),(a,b,c),return)
-SDL_DYNAPI_PROC(void,SDL_SetWindowsMessageHook,(SDL_WindowsMessageHook a, void *b),(a,b),)
-SDL_DYNAPI_PROC(void,SDL_UnregisterApp,(void),(),)
-
-SDL_DYNAPI_PROC(SDL_bool,SDL_DXGIGetOutputInfo,(SDL_DisplayID a, int *b, int *c),(a,b,c),return)
-SDL_DYNAPI_PROC(int,SDL_Direct3D9GetAdapterIndex,(SDL_DisplayID a),(a),return)
-
-SDL_DYNAPI_PROC(int,SDL_GDKGetTaskQueue,(XTaskQueueHandle *a),(a),return)
-SDL_DYNAPI_PROC(void,SDL_GDKSuspendComplete,(void),(),)
-
-SDL_DYNAPI_PROC(SDL_WinRT_DeviceFamily,SDL_WinRTGetDeviceFamily,(void),(),return)
-SDL_DYNAPI_PROC(const wchar_t*,SDL_WinRTGetFSPathUNICODE,(SDL_WinRT_Path a),(a),return)
-SDL_DYNAPI_PROC(const char*,SDL_WinRTGetFSPathUTF8,(SDL_WinRT_Path a),(a),return)
-
-SDL_DYNAPI_PROC(int,SDL_LinuxSetThreadPriority,(Sint64 a, int b),(a,b),return)
-SDL_DYNAPI_PROC(int,SDL_LinuxSetThreadPriorityAndPolicy,(Sint64 a, int b, int c),(a,b,c),return)
-
-SDL_DYNAPI_PROC(void,SDL_OnApplicationDidChangeStatusBarOrientation,(void),(),)
-SDL_DYNAPI_PROC(int,SDL_iPhoneSetAnimationCallback,(SDL_Window *a, int b, void (SDLCALL *c)(void *), void *d),(a,b,c,d),return)
-SDL_DYNAPI_PROC(void,SDL_iPhoneSetEventPump,(SDL_bool a),(a),)
-
-SDL_DYNAPI_PROC(void,SDL_AndroidBackButton,(void),(),)
-SDL_DYNAPI_PROC(void*,SDL_AndroidGetActivity,(void),(),return)
-SDL_DYNAPI_PROC(const char*,SDL_AndroidGetExternalStoragePath,(void),(),return)
-SDL_DYNAPI_PROC(int,SDL_AndroidGetExternalStorageState,(Uint32 *a),(a),return)
-SDL_DYNAPI_PROC(const char*,SDL_AndroidGetInternalStoragePath,(void),(),return)
-SDL_DYNAPI_PROC(void*,SDL_AndroidGetJNIEnv,(void),(),return)
-SDL_DYNAPI_PROC(SDL_bool,SDL_AndroidRequestPermission,(const char *a),(a),return)
-SDL_DYNAPI_PROC(int,SDL_AndroidSendMessage,(Uint32 a, int b),(a,b),return)
-SDL_DYNAPI_PROC(int,SDL_AndroidShowToast,(const char *a, int b, int c, int d, int e),(a,b,c,d,e),return)
-SDL_DYNAPI_PROC(int,SDL_GetAndroidSDKVersion,(void),(),return)
-SDL_DYNAPI_PROC(SDL_bool,SDL_IsAndroidTV,(void),(),return)
-SDL_DYNAPI_PROC(SDL_bool,SDL_IsChromebook,(void),(),return)
-SDL_DYNAPI_PROC(SDL_bool,SDL_IsDeXMode,(void),(),return)
 /* New API symbols are added at the end */
 SDL_DYNAPI_PROC(SDL_Surface*,SDL_AcquireCameraFrame,(SDL_Camera *a, Uint64 *b),(a,b),return)
-
 SDL_DYNAPI_PROC(int,SDL_AddEventWatch,(SDL_EventFilter a, void *b),(a,b),return)
 SDL_DYNAPI_PROC(int,SDL_AddGamepadMapping,(const char *a),(a),return)
 SDL_DYNAPI_PROC(int,SDL_AddGamepadMappingsFromFile,(const char *a),(a),return)
