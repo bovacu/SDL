@@ -35,13 +35,19 @@ struct joystick_hwdata
     int fd_sensor;
     struct SDL_joylist_item *item;
     struct SDL_sensorlist_item *item_sensor;
-    SDL_JoystickGUID guid;
+    SDL_GUID guid;
     char *fname; /* Used in haptic subsystem */
 
     SDL_bool ff_rumble;
     SDL_bool ff_sine;
     struct ff_effect effect;
     Uint32 effect_expiration;
+
+    /* The current Linux joystick driver maps balls to two axes */
+    struct hwdata_ball
+    {
+        int axis[2];
+    } *balls;
 
     /* The current Linux joystick driver maps hats to two axes */
     struct hwdata_hat

@@ -25,15 +25,15 @@
 
 #include "../SDL_sysvideo.h"
 
+extern void SDL_UpdateLifecycleObserver(void);
+
 extern Uint64 UIKit_GetEventTimestamp(NSTimeInterval nsTimestamp);
 extern void UIKit_PumpEvents(SDL_VideoDevice *_this);
 
 extern void SDL_InitGCKeyboard(void);
-extern SDL_bool SDL_HasGCKeyboard(void);
 extern void SDL_QuitGCKeyboard(void);
 
 extern void SDL_InitGCMouse(void);
-extern SDL_bool SDL_HasGCMouse(void);
 extern SDL_bool SDL_GCMouseRelativeMode(void);
 extern void SDL_QuitGCMouse(void);
 

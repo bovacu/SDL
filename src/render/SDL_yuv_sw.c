@@ -25,9 +25,10 @@
 #if SDL_HAVE_YUV
 
 #include "SDL_yuv_sw_c.h"
+#include "../video/SDL_blit.h"
 #include "../video/SDL_yuv_c.h"
 
-SDL_SW_YUVTexture *SDL_SW_CreateYUVTexture(Uint32 format, int w, int h)
+SDL_SW_YUVTexture *SDL_SW_CreateYUVTexture(SDL_PixelFormat format, int w, int h)
 {
     SDL_SW_YUVTexture *swdata;
 
@@ -60,7 +61,7 @@ SDL_SW_YUVTexture *SDL_SW_CreateYUVTexture(Uint32 format, int w, int h)
             SDL_SW_DestroyYUVTexture(swdata);
             return NULL;
         }
-        swdata->pixels = (Uint8 *)SDL_aligned_alloc(SDL_SIMDGetAlignment(), dst_size);
+        swdata->pixels = (Uint8 *)SDL_aligned_alloc(SDL_GetSIMDAlignment(), dst_size);
         if (!swdata->pixels) {
             SDL_SW_DestroyYUVTexture(swdata);
             return NULL;
@@ -211,7 +212,9 @@ int SDL_SW_UpdateYUVTexture(SDL_SW_YUVTexture *swdata, const SDL_Rect *rect,
                 dst += 2 * ((swdata->w + 1) / 2);
             }
         }
-    }
+    } break;
+    default:
+        return SDL_SetError("Unsupported YUV format");
     }
     return 0;
 }
@@ -316,6 +319,8 @@ int SDL_SW_LockYUVTexture(SDL_SW_YUVTexture *swdata, const SDL_Rect *rect,
             return SDL_SetError("YV12, IYUV, NV12, NV21 textures only support full surface locks");
         }
         break;
+    default:
+        return SDL_SetError("Unsupported YUV format");
     }
 
     if (rect) {
@@ -332,7 +337,7 @@ void SDL_SW_UnlockYUVTexture(SDL_SW_YUVTexture *swdata)
 }
 
 int SDL_SW_CopyYUVToRGB(SDL_SW_YUVTexture *swdata, const SDL_Rect *srcrect,
-                        Uint32 target_format, int w, int h, void *pixels,
+                        SDL_PixelFormat target_format, int w, int h, void *pixels,
                         int pitch)
 {
     int stretch;
@@ -361,7 +366,7 @@ int SDL_SW_CopyYUVToRGB(SDL_SW_YUVTexture *swdata, const SDL_Rect *srcrect,
             swdata->display->pixels = pixels;
             swdata->display->pitch = pitch;
         } else {
-            swdata->display = SDL_CreateSurfaceFrom(pixels, w, h, pitch, target_format);
+            swdata->display = SDL_CreateSurfaceFrom(w, h, target_format, pixels, pitch);
             if (!swdata->display) {
                 return -1;
             }

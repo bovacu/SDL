@@ -25,9 +25,6 @@
 #include "../SDL_sysaudio.h"
 #include "SDL_dummyaudio.h"
 
-// !!! FIXME: this should be an SDL hint, not an environment variable.
-#define DUMMYENVR_IODELAY "SDL_DUMMYAUDIODELAY"
-
 static int DUMMYAUDIO_WaitDevice(SDL_AudioDevice *device)
 {
     SDL_Delay(device->hidden->io_delay);
@@ -36,22 +33,27 @@ static int DUMMYAUDIO_WaitDevice(SDL_AudioDevice *device)
 
 static int DUMMYAUDIO_OpenDevice(SDL_AudioDevice *device)
 {
-    const char *envr = SDL_getenv(DUMMYENVR_IODELAY);
-
     device->hidden = (struct SDL_PrivateAudioData *) SDL_calloc(1, sizeof(*device->hidden));
     if (!device->hidden) {
         return -1;
     }
 
-    if (!device->iscapture) {
+    if (!device->recording) {
         device->hidden->mixbuf = (Uint8 *) SDL_malloc(device->buffer_size);
         if (!device->hidden->mixbuf) {
             return -1;
         }
     }
 
-    device->hidden->io_delay = (Uint32) (envr ? SDL_atoi(envr) : ((device->sample_frames * 1000) / device->spec.freq));
+    device->hidden->io_delay = ((device->sample_frames * 1000) / device->spec.freq);
 
+    const char *hint = SDL_GetHint(SDL_HINT_AUDIO_DUMMY_TIMESCALE);
+    if (hint) {
+        double scale = SDL_atof(hint);
+        if (scale >= 0.0) {
+            device->hidden->io_delay = (Uint32)SDL_round(device->hidden->io_delay * scale);
+        }
+    }
     return 0; // we're good; don't change reported device format.
 }
 
@@ -69,7 +71,7 @@ static Uint8 *DUMMYAUDIO_GetDeviceBuf(SDL_AudioDevice *device, int *buffer_size)
     return device->hidden->mixbuf;
 }
 
-static int DUMMYAUDIO_CaptureFromDevice(SDL_AudioDevice *device, void *buffer, int buflen)
+static int DUMMYAUDIO_RecordDevice(SDL_AudioDevice *device, void *buffer, int buflen)
 {
     // always return a full buffer of silence.
     SDL_memset(buffer, device->silence_value, buflen);
@@ -82,12 +84,12 @@ static SDL_bool DUMMYAUDIO_Init(SDL_AudioDriverImpl *impl)
     impl->CloseDevice = DUMMYAUDIO_CloseDevice;
     impl->WaitDevice = DUMMYAUDIO_WaitDevice;
     impl->GetDeviceBuf = DUMMYAUDIO_GetDeviceBuf;
-    impl->WaitCaptureDevice = DUMMYAUDIO_WaitDevice;
-    impl->CaptureFromDevice = DUMMYAUDIO_CaptureFromDevice;
+    impl->WaitRecordingDevice = DUMMYAUDIO_WaitDevice;
+    impl->RecordDevice = DUMMYAUDIO_RecordDevice;
 
-    impl->OnlyHasDefaultOutputDevice = SDL_TRUE;
-    impl->OnlyHasDefaultCaptureDevice = SDL_TRUE;
-    impl->HasCaptureSupport = SDL_TRUE;
+    impl->OnlyHasDefaultPlaybackDevice = SDL_TRUE;
+    impl->OnlyHasDefaultRecordingDevice = SDL_TRUE;
+    impl->HasRecordingSupport = SDL_TRUE;
 
     return SDL_TRUE;
 }

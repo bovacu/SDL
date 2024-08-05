@@ -41,12 +41,11 @@
 #define BUTTON_BACK       8
 #define BUTTON_FORWARD    16
 
-typedef struct
+struct SDL_CursorData
 {
     int custom_cursor;
     int system_cursor;
-
-} SDL_AndroidCursorData;
+};
 
 /* Last known Android mouse button state (includes all buttons) */
 static int last_state;
@@ -60,11 +59,11 @@ static SDL_Cursor *Android_WrapCursor(int custom_cursor, int system_cursor)
 
     cursor = SDL_calloc(1, sizeof(*cursor));
     if (cursor) {
-        SDL_AndroidCursorData *data = (SDL_AndroidCursorData *)SDL_calloc(1, sizeof(*data));
+        SDL_CursorData *data = (SDL_CursorData *)SDL_calloc(1, sizeof(*data));
         if (data) {
             data->custom_cursor = custom_cursor;
             data->system_cursor = system_cursor;
-            cursor->driverdata = data;
+            cursor->internal = data;
         } else {
             SDL_free(cursor);
             cursor = NULL;
@@ -74,9 +73,9 @@ static SDL_Cursor *Android_WrapCursor(int custom_cursor, int system_cursor)
     return cursor;
 }
 
-static SDL_Cursor *Android_CreateDefaultCursor()
+static SDL_Cursor *Android_CreateDefaultCursor(void)
 {
-    return Android_WrapCursor(0, SDL_SYSTEM_CURSOR_ARROW);
+    return Android_WrapCursor(0, SDL_SYSTEM_CURSOR_DEFAULT);
 }
 
 static SDL_Cursor *Android_CreateCursor(SDL_Surface *surface, int hot_x, int hot_y)
@@ -84,7 +83,7 @@ static SDL_Cursor *Android_CreateCursor(SDL_Surface *surface, int hot_x, int hot
     int custom_cursor;
     SDL_Surface *converted;
 
-    converted = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ARGB8888);
+    converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ARGB8888);
     if (!converted) {
         return NULL;
     }
@@ -104,15 +103,15 @@ static SDL_Cursor *Android_CreateSystemCursor(SDL_SystemCursor id)
 
 static void Android_FreeCursor(SDL_Cursor *cursor)
 {
-    SDL_AndroidCursorData *data = (SDL_AndroidCursorData *)cursor->driverdata;
+    SDL_CursorData *data = cursor->internal;
     if (data->custom_cursor != 0) {
         Android_JNI_DestroyCustomCursor(data->custom_cursor);
     }
-    SDL_free(cursor->driverdata);
+    SDL_free(cursor->internal);
     SDL_free(cursor);
 }
 
-static SDL_Cursor *Android_CreateEmptyCursor()
+static SDL_Cursor *Android_CreateEmptyCursor(void)
 {
     if (!empty_cursor) {
         SDL_Surface *empty_surface = SDL_CreateSurface(1, 1, SDL_PIXELFORMAT_ARGB8888);
@@ -125,7 +124,7 @@ static SDL_Cursor *Android_CreateEmptyCursor()
     return empty_cursor;
 }
 
-static void Android_DestroyEmptyCursor()
+static void Android_DestroyEmptyCursor(void)
 {
     if (empty_cursor) {
         Android_FreeCursor(empty_cursor);
@@ -139,7 +138,7 @@ static int Android_ShowCursor(SDL_Cursor *cursor)
         cursor = Android_CreateEmptyCursor();
     }
     if (cursor) {
-        SDL_AndroidCursorData *data = (SDL_AndroidCursorData *)cursor->driverdata;
+        SDL_CursorData *data = cursor->internal;
         if (data->custom_cursor) {
             if (!Android_JNI_SetCustomCursor(data->custom_cursor)) {
                 return SDL_Unsupported();
@@ -221,25 +220,25 @@ void Android_OnMouse(SDL_Window *window, int state, int action, float x, float y
         changes = state & ~last_state;
         button = TranslateButton(changes);
         last_state = state;
-        SDL_SendMouseMotion(0, window, 0, relative, x, y);
-        SDL_SendMouseButton(0, window, 0, SDL_PRESSED, button);
+        SDL_SendMouseMotion(0, window, SDL_DEFAULT_MOUSE_ID, relative, x, y);
+        SDL_SendMouseButton(0, window, SDL_DEFAULT_MOUSE_ID, SDL_PRESSED, button);
         break;
 
     case ACTION_UP:
         changes = last_state & ~state;
         button = TranslateButton(changes);
         last_state = state;
-        SDL_SendMouseMotion(0, window, 0, relative, x, y);
-        SDL_SendMouseButton(0, window, 0, SDL_RELEASED, button);
+        SDL_SendMouseMotion(0, window, SDL_DEFAULT_MOUSE_ID, relative, x, y);
+        SDL_SendMouseButton(0, window, SDL_DEFAULT_MOUSE_ID, SDL_RELEASED, button);
         break;
 
     case ACTION_MOVE:
     case ACTION_HOVER_MOVE:
-        SDL_SendMouseMotion(0, window, 0, relative, x, y);
+        SDL_SendMouseMotion(0, window, SDL_DEFAULT_MOUSE_ID, relative, x, y);
         break;
 
     case ACTION_SCROLL:
-        SDL_SendMouseWheel(0, window, 0, x, y, SDL_MOUSEWHEEL_NORMAL);
+        SDL_SendMouseWheel(0, window, SDL_DEFAULT_MOUSE_ID, x, y, SDL_MOUSEWHEEL_NORMAL);
         break;
 
     default:

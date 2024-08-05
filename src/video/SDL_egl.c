@@ -189,14 +189,14 @@ SDL_bool SDL_EGL_HasExtension(SDL_VideoDevice *_this, SDL_EGL_ExtensionType type
         return SDL_FALSE;
     }
 
-    /* Extensions can be masked with an environment variable.
+    /* Extensions can be masked with a hint or environment variable.
      * Unlike the OpenGL override, this will use the set bits of an integer
      * to disable the extension.
      *  Bit   Action
      *  0     If set, the display extension is masked and not present to SDL.
      *  1     If set, the client extension is masked and not present to SDL.
      */
-    ext_override = SDL_getenv(ext);
+    ext_override = SDL_GetHint(ext);
     if (ext_override) {
         int disable_ext = SDL_atoi(ext_override);
         if (disable_ext & 0x01 && type == SDL_EGL_DISPLAY_EXTENSION) {
@@ -1216,7 +1216,7 @@ int SDL_EGL_DeleteContext(SDL_VideoDevice *_this, SDL_GLContext context)
     return 0;
 }
 
-EGLSurface *SDL_EGL_CreateSurface(SDL_VideoDevice *_this, SDL_Window *window, NativeWindowType nw)
+EGLSurface SDL_EGL_CreateSurface(SDL_VideoDevice *_this, SDL_Window *window, NativeWindowType nw)
 {
 #ifdef SDL_VIDEO_DRIVER_ANDROID
     EGLint format_wanted;
@@ -1226,7 +1226,7 @@ EGLSurface *SDL_EGL_CreateSurface(SDL_VideoDevice *_this, SDL_Window *window, Na
     EGLint attribs[33];
     int attr = 0;
 
-    EGLSurface *surface;
+    EGLSurface surface;
 
     if (SDL_EGL_ChooseConfig(_this) != 0) {
         return EGL_NO_SURFACE;

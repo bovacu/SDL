@@ -2,7 +2,12 @@
 # CMake script for building the SDL tests
 #
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../cmake")
+
+include(CheckIncludeFile)
 include(CheckStructHasMember)
+include(CMakePushCheckState)
+include(sdlcompilers)
 
 if(SDL_TESTS_LINK_SHARED)
     set(sdl_name_component SDL3-shared)
@@ -32,6 +37,20 @@ add_library(sdltests_utils OBJECT
 target_link_libraries(sdltests_utils PRIVATE SDL3::Headers)
 
 file(GLOB RESOURCE_FILES *.bmp *.wav *.hex moose.dat utf8.txt)
+
+option(SDLTEST_TRACKMEM "Run tests with --trackmem" OFF)
+
+if(WIN32 AND NOT WINDOWS_STORE)
+    option(SDLTEST_PROCDUMP "Run tests using sdlprocdump for minidump generation" OFF)
+    add_executable(sdlprocdump win32/sdlprocdump.c)
+    set_property(TARGET sdlprocdump PROPERTY C_STANDARD "90")
+    SDL_AddCommonCompilerFlags(sdlprocdump)
+    if(SDLTEST_PROCDUMP)
+        set(CMAKE_TEST_LAUNCHER "$<TARGET_FILE:sdlprocdump>")
+    else()
+        set_property(TARGET sdlprocdump PROPERTY EXCLUDE_FROM_ALL "1")
+    endif()
+endif()
 
 if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
     set(test_bin_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
@@ -80,7 +99,7 @@ if(WINDOWS_STORE)
 endif()
 
 macro(add_sdl_test_executable TARGET)
-    cmake_parse_arguments(AST "BUILD_DEPENDENT;NONINTERACTIVE;NEEDS_RESOURCES;TESTUTILS;NO_C90;MAIN_CALLBACKS" "" "NONINTERACTIVE_TIMEOUT;NONINTERACTIVE_ARGS;SOURCES" ${ARGN})
+    cmake_parse_arguments(AST "BUILD_DEPENDENT;NONINTERACTIVE;NEEDS_RESOURCES;TESTUTILS;NO_C90;MAIN_CALLBACKS;NOTRACKMEM" "" "NONINTERACTIVE_TIMEOUT;NONINTERACTIVE_ARGS;SOURCES" ${ARGN})
     if(AST_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "Unknown argument(s): ${AST_UNPARSED_ARGUMENTS}")
     endif()
@@ -126,6 +145,7 @@ macro(add_sdl_test_executable TARGET)
         add_executable(${TARGET} ${AST_SOURCES} ${EXTRA_SOURCES})
     endif()
     SDL_AddCommonCompilerFlags(${TARGET})
+    target_include_directories(${TARGET} PRIVATE "${SDL3_SOURCE_DIR}/src/video/khronos")
     target_link_libraries(${TARGET} PRIVATE SDL3::SDL3_test SDL3::${sdl_name_component})
     if(NOT AST_NO_C90 AND NOT SDL_CMAKE_PLATFORM MATCHES "^(n3ds|ps2|psp)$")
         set_property(TARGET ${TARGET} PROPERTY C_STANDARD 90)
@@ -133,6 +153,7 @@ macro(add_sdl_test_executable TARGET)
     endif()
 
     list(APPEND SDL_TEST_EXECUTABLES ${TARGET})
+    set_property(TARGET ${TARGET} PROPERTY SDL_NOTRACKMEM ${AST_NOTRACKMEM})
     if(AST_NONINTERACTIVE)
         set_property(TARGET ${TARGET} PROPERTY SDL_NONINTERACTIVE 1)
     endif()
@@ -220,32 +241,35 @@ if(HAVE_LIBUDEV_H)
 endif()
 
 set(FFmpeg_FIND_COMPONENTS AVCODEC AVFORMAT AVUTIL SWSCALE)
-include("${SDL3_SOURCE_DIR}/cmake/FindFFmpeg.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/FindFFmpeg.cmake")
 if(FFmpeg_FOUND)
     cmake_push_check_state()
     list(APPEND CMAKE_REQUIRED_INCLUDES "${FFmpeg_AVUTIL_INCLUDE_DIRS}")
+    list(APPEND CMAKE_REQUIRED_INCLUDES "${SDL3_SOURCE_DIR}/src/video/khronos")
     check_struct_has_member("AVFrame" "ch_layout" "libavutil/frame.h" LIBAVUTIL_AVFRAME_HAS_CH_LAYOUT)
+    check_struct_has_member("AVVulkanFramesContext" "format" "libavutil/hwcontext_vulkan.h" LIBAVUTIL_AVFULKANFRAMESCONTEXT_HAS_FORMAT)
     cmake_pop_check_state()
 endif()
 if(FFmpeg_FOUND AND LIBAVUTIL_AVFRAME_HAS_CH_LAYOUT)
-    add_sdl_test_executable(testffmpeg NO_C90 SOURCES testffmpeg.c ${icon_bmp_header})
+    add_sdl_test_executable(testffmpeg NO_C90 SOURCES testffmpeg.c testffmpeg_vulkan.c ${icon_bmp_header})
+    if(LIBAVUTIL_AVFULKANFRAMESCONTEXT_HAS_FORMAT)
+      target_compile_definitions(testffmpeg PRIVATE FFMPEG_VULKAN_SUPPORT)
+    endif()
     if(APPLE)
         target_link_options(testffmpeg PRIVATE "-Wl,-framework,CoreVideo")
     endif()
-    if(HAVE_OPENGLES_V2)
+    if(TARGET OpenGL::EGL)
         message(DEBUG "Enabling EGL support in testffmpeg")
+        target_link_libraries(testffmpeg PRIVATE OpenGL::EGL)
         target_compile_definitions(testffmpeg PRIVATE HAVE_EGL)
-        if(TARGET OpenGL::EGL)
-            target_link_libraries(testffmpeg PRIVATE OpenGL::EGL)
-        endif()
     endif()
+    target_include_directories(testffmpeg SYSTEM BEFORE PRIVATE ${SDL3_SOURCE_DIR}/src/video/khronos)
     target_link_libraries(testffmpeg PRIVATE ${FFMPEG_LIBRARIES})
 else()
     message(STATUS "Can't find ffmpeg 5.1.3 or newer, skipping testffmpeg")
 endif()
 
 add_sdl_test_executable(checkkeys SOURCES checkkeys.c)
-add_sdl_test_executable(checkkeysthreads SOURCES checkkeysthreads.c)
 add_sdl_test_executable(loopwave NEEDS_RESOURCES TESTUTILS MAIN_CALLBACKS SOURCES loopwave.c)
 add_sdl_test_executable(testsurround SOURCES testsurround.c)
 add_sdl_test_executable(testresample NEEDS_RESOURCES SOURCES testresample.c)
@@ -256,35 +280,27 @@ file(GLOB TESTAUTOMATION_SOURCE_FILES testautomation*.c)
 add_sdl_test_executable(testautomation NONINTERACTIVE NONINTERACTIVE_TIMEOUT 120 NEEDS_RESOURCES NO_C90 SOURCES ${TESTAUTOMATION_SOURCE_FILES})
 add_sdl_test_executable(testmultiaudio NEEDS_RESOURCES TESTUTILS SOURCES testmultiaudio.c)
 add_sdl_test_executable(testaudiohotplug NEEDS_RESOURCES TESTUTILS SOURCES testaudiohotplug.c)
-add_sdl_test_executable(testaudiocapture MAIN_CALLBACKS SOURCES testaudiocapture.c)
+add_sdl_test_executable(testaudiorecording MAIN_CALLBACKS SOURCES testaudiorecording.c)
 add_sdl_test_executable(testatomic NONINTERACTIVE SOURCES testatomic.c)
 add_sdl_test_executable(testintersections SOURCES testintersections.c)
 add_sdl_test_executable(testrelative SOURCES testrelative.c)
 add_sdl_test_executable(testhittesting SOURCES testhittesting.c)
 add_sdl_test_executable(testdraw SOURCES testdraw.c)
 add_sdl_test_executable(testdrawchessboard SOURCES testdrawchessboard.c)
-add_sdl_test_executable(testdropfile SOURCES testdropfile.c)
+add_sdl_test_executable(testdropfile MAIN_CALLBACKS SOURCES testdropfile.c)
 add_sdl_test_executable(testerror NONINTERACTIVE SOURCES testerror.c)
 
 set(build_options_dependent_tests )
 
 add_sdl_test_executable(testevdev BUILD_DEPENDENT NONINTERACTIVE SOURCES testevdev.c)
 
-if(APPLE)
+if(MACOS)
     add_sdl_test_executable(testnative BUILD_DEPENDENT NEEDS_RESOURCES TESTUTILS
         SOURCES
             testnative.c
             testnativecocoa.m
             testnativex11.c
     )
-
-    cmake_push_check_state()
-    check_c_compiler_flag(-Wno-error=deprecated-declarations HAVE_WNO_ERROR_DEPRECATED_DECLARATIONS)
-    cmake_pop_check_state()
-    target_link_libraries(testnative PRIVATE "-Wl,-framework,Cocoa")
-    if(HAVE_WNO_ERROR_DEPRECATED_DECLARATIONS)
-        set_property(SOURCE "testnativecocoa.m" APPEND_STRING PROPERTY COMPILE_FLAGS " -Wno-error=deprecated-declarations")
-    endif()
 elseif(WINDOWS)
     add_sdl_test_executable(testnative BUILD_DEPENDENT NEEDS_RESOURCES TESTUTILS SOURCES testnative.c testnativew32.c)
 elseif(HAVE_X11 OR HAVE_WAYLAND)
@@ -318,7 +334,7 @@ function(files2headers OUTPUT)
             # Don't add the 'output' header to the output, to avoid marking them as GENERATED
             # (generated files are removed when running the CLEAN target)
             add_custom_command(OUTPUT "${intermediate}"
-                COMMAND Python3::Interpreter "${xxd}" -i "${CMAKE_CURRENT_SOURCE_DIR}/${input}" "-o" "${intermediate}"
+                COMMAND "${Python3_EXECUTABLE}" "${xxd}" -i "${CMAKE_CURRENT_SOURCE_DIR}/${input}" "-o" "${intermediate}"
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${intermediate}" "${output}"
                 DEPENDS "${xxd}" "${bmp}"
             )
@@ -331,11 +347,7 @@ files2headers(gamepad_image_headers
     gamepad_axis_arrow.bmp
     gamepad_axis.bmp
     gamepad_back.bmp
-    gamepad_battery_empty.bmp
-    gamepad_battery_full.bmp
-    gamepad_battery_low.bmp
-    gamepad_battery_medium.bmp
-    gamepad_battery_unknown.bmp
+    gamepad_battery.bmp
     gamepad_battery_wired.bmp
     gamepad_button_background.bmp
     gamepad_button.bmp
@@ -358,9 +370,15 @@ add_sdl_test_executable(testgl SOURCES testgl.c)
 add_sdl_test_executable(testgles SOURCES testgles.c)
 if(ANDROID)
     target_link_libraries(testgles PRIVATE GLESv1_CM)
+elseif(IOS OR TVOS)
+    find_library(GLES_LIB OpenGLES REQUIRED)
+    target_link_libraries(testgles PRIVATE "${GLES_LIB}")
 endif()
-add_sdl_test_executable(testgles2 SOURCES testgles2.c)
-add_sdl_test_executable(testgles2_sdf NEEDS_RESOURCES TESTUTILS SOURCES testgles2_sdf.c)
+check_include_file("GLES2/gl2platform.h" HAVE_GLES2_GL2PLATFORM_H)
+if(HAVE_GLES2_GL2PLATFORM_H OR (TARGET SDL3-static OR SDL3-shared))
+    add_sdl_test_executable(testgles2 SOURCES testgles2.c)
+    add_sdl_test_executable(testgles2_sdf NEEDS_RESOURCES TESTUTILS SOURCES testgles2_sdf.c)
+endif()
 add_sdl_test_executable(testhaptic SOURCES testhaptic.c)
 add_sdl_test_executable(testhotplug SOURCES testhotplug.c)
 add_sdl_test_executable(testpen SOURCES testpen.c)
@@ -390,12 +408,12 @@ add_sdl_test_executable(testshader NEEDS_RESOURCES TESTUTILS SOURCES testshader.
 add_sdl_test_executable(testshape NEEDS_RESOURCES SOURCES testshape.c ${glass_bmp_header})
 add_sdl_test_executable(testsprite MAIN_CALLBACKS NEEDS_RESOURCES TESTUTILS SOURCES testsprite.c)
 add_sdl_test_executable(testspriteminimal SOURCES testspriteminimal.c ${icon_bmp_header})
+add_sdl_test_executable(testspritesurface SOURCES testspritesurface.c ${icon_bmp_header})
 add_sdl_test_executable(teststreaming NEEDS_RESOURCES TESTUTILS SOURCES teststreaming.c)
 add_sdl_test_executable(testtimer NONINTERACTIVE NONINTERACTIVE_ARGS --no-interactive NONINTERACTIVE_TIMEOUT 60 SOURCES testtimer.c)
 add_sdl_test_executable(testurl SOURCES testurl.c)
-add_sdl_test_executable(testver NONINTERACTIVE SOURCES testver.c)
-add_sdl_test_executable(testvideocapture SOURCES testvideocapture.c)
-add_sdl_test_executable(testvideocaptureminimal SOURCES testvideocaptureminimal.c)
+add_sdl_test_executable(testver NONINTERACTIVE NOTRACKMEM SOURCES testver.c)
+add_sdl_test_executable(testcamera MAIN_CALLBACKS SOURCES testcamera.c)
 add_sdl_test_executable(testviewport NEEDS_RESOURCES TESTUTILS SOURCES testviewport.c)
 add_sdl_test_executable(testwm SOURCES testwm.c)
 add_sdl_test_executable(testyuv NONINTERACTIVE NONINTERACTIVE_ARGS "--automated" NEEDS_RESOURCES TESTUTILS SOURCES testyuv.c testyuv_cvt.c)
@@ -409,6 +427,10 @@ add_sdl_test_executable(testcustomcursor SOURCES testcustomcursor.c)
 add_sdl_test_executable(testvulkan NO_C90 SOURCES testvulkan.c)
 add_sdl_test_executable(testoffscreen SOURCES testoffscreen.c)
 add_sdl_test_executable(testpopup SOURCES testpopup.c)
+add_sdl_test_executable(testdialog SOURCES testdialog.c)
+add_sdl_test_executable(testtime SOURCES testtime.c)
+add_sdl_test_executable(testmanymouse SOURCES testmanymouse.c)
+add_sdl_test_executable(testmodal SOURCES testmodal.c)
 
 if (HAVE_WAYLAND)
     # Set the GENERATED property on the protocol file, since it is first created at build time
@@ -472,6 +494,19 @@ if(EMSCRIPTEN)
             COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/emscripten/server.py" -d "${CMAKE_CURRENT_BINARY_DIR}")
     endif()
 endif()
+if(MACOS)
+    target_link_options(testnative PRIVATE "-Wl,-framework,Cocoa")
+endif()
+if(APPLE)
+    cmake_push_check_state()
+    check_c_compiler_flag(-Wno-error=deprecated-declarations HAVE_WNO_ERROR_DEPRECATED_DECLARATIONS)
+    cmake_pop_check_state()
+    if(HAVE_WNO_ERROR_DEPRECATED_DECLARATIONS)
+        set_property(SOURCE "testnativecocoa.m" APPEND PROPERTY COMPILE_OPTIONS "-Wno-error=deprecated-declarations")
+        set_property(TARGET testgles APPEND PROPERTY COMPILE_OPTIONS "-Wno-error=deprecated-declarations")
+    endif()
+endif()
+
 
 if(PSP)
     # Build EBOOT files if building for PSP
@@ -569,40 +604,61 @@ set(TESTS_ENVIRONMENT
     PATH=$<TARGET_FILE_DIR:SDL3::${sdl_name_component}>
 )
 
-foreach(TEST ${SDL_TEST_EXECUTABLES})
-    get_property(noninteractive TARGET ${TEST} PROPERTY SDL_NONINTERACTIVE)
+function(add_sdl_test TEST TARGET)
+    cmake_parse_arguments(ast "INSTALL" "" "" ${ARGN})
+    get_property(noninteractive TARGET ${TARGET} PROPERTY SDL_NONINTERACTIVE)
     if(noninteractive)
-        set(command ${TEST})
-        get_property(noninteractive_arguments TARGET ${TEST} PROPERTY SDL_NONINTERACTIVE_ARGUMENTS)
+        set(command ${TARGET})
+        get_property(noninteractive_arguments TARGET ${TARGET} PROPERTY SDL_NONINTERACTIVE_ARGUMENTS)
         if(noninteractive_arguments)
             list(APPEND command ${noninteractive_arguments})
         endif()
+        if(SDLTEST_TRACKMEM)
+            get_property(notrackmem TARGET ${TARGET} PROPERTY SDL_NOTRACKMEM)
+            if(NOT notrackmem)
+                list(APPEND command --trackmem)
+            endif()
+        endif()
         add_test(
-            NAME ${TEST}
-            COMMAND ${command}
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                NAME ${TEST}
+                COMMAND ${command}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         )
+        if(NOT notrackmem)
+            set_property(TEST ${TEST} PROPERTY FAIL_REGULAR_EXPRESSION "Total: [0-9]+\\.[0-9]+ Kb in [1-9][0-9]* allocations")
+        endif()
         set_tests_properties(${TEST} PROPERTIES ENVIRONMENT "${TESTS_ENVIRONMENT}")
-        get_property(noninteractive_timeout TARGET ${TEST} PROPERTY SDL_NONINTERACTIVE_TIMEOUT)
+        get_property(noninteractive_timeout TARGET ${TARGET} PROPERTY SDL_NONINTERACTIVE_TIMEOUT)
         if(NOT noninteractive_timeout)
             set(noninteractive_timeout 10)
         endif()
         math(EXPR noninteractive_timeout "${noninteractive_timeout}*${SDL_TESTS_TIMEOUT_MULTIPLIER}")
         set_tests_properties(${TEST} PROPERTIES TIMEOUT "${noninteractive_timeout}")
-        if(SDL_INSTALL_TESTS)
-            set(exe ${TEST})
+        if(ast_INSTALL AND SDL_INSTALL_TESTS)
+            set(exe ${TARGET})
             set(installedtestsdir "${CMAKE_INSTALL_FULL_LIBEXECDIR}/installed-tests/SDL3")
             configure_file(template.test.in "${exe}.test" @ONLY)
             install(
-                FILES "${CMAKE_CURRENT_BINARY_DIR}/${exe}.test"
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/installed-tests/SDL3
+                    FILES "${CMAKE_CURRENT_BINARY_DIR}/${exe}.test"
+                    DESTINATION ${CMAKE_INSTALL_DATADIR}/installed-tests/SDL3
             )
         endif()
-        if(TARGET pretest AND NOT "${TEST}" MATCHES "pretest")
+        if(TARGET pretest AND NOT "${TARGET}" MATCHES "pretest")
             set_property(TEST ${TEST} APPEND PROPERTY DEPENDS pretest)
         endif()
     endif()
+endfunction()
+
+foreach(TARGET ${SDL_TEST_EXECUTABLES})
+    add_sdl_test(${TARGET} ${TARGET} INSTALL)
 endforeach()
+
+add_sdl_test(testautomation-no-simd testautomation)
+add_sdl_test(testplatform-no-simd testplatform)
+set_property(TEST testautomation-no-simd testplatform-no-simd APPEND PROPERTY ENVIRONMENT "SDL_CPU_FEATURE_MASK=-all")
+
+# testautomation creates temporary files which might conflict
+set_property(TEST testautomation-no-simd testautomation PROPERTY RUN_SERIAL TRUE)
 
 if(SDL_INSTALL_TESTS)
     if(RISCOS)

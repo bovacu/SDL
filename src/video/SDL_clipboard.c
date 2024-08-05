@@ -186,12 +186,12 @@ void *SDL_GetClipboardData(const char *mime_type, size_t *size)
     if (_this->GetClipboardData) {
         return _this->GetClipboardData(_this, mime_type, size);
     } else if (_this->GetClipboardText && SDL_IsTextMimeType(mime_type)) {
-        void *data = _this->GetClipboardText(_this);
-        if (data && *(char *)data == '\0') {
-            SDL_free(data);
-            data = NULL;
+        char *text = _this->GetClipboardText(_this);
+        if (text && *text == '\0') {
+            SDL_free(text);
+            text = NULL;
         }
-        return data;
+        return text;
     } else {
         return SDL_GetInternalClipboardData(_this, mime_type, size);
     }
@@ -253,7 +253,7 @@ static const char **SDL_GetTextMimeTypes(SDL_VideoDevice *_this, size_t *num_mim
     }
 }
 
-const void *SDL_ClipboardTextCallback(void *userdata, const char *mime_type, size_t *size)
+const void * SDLCALL SDL_ClipboardTextCallback(void *userdata, const char *mime_type, size_t *size)
 {
     char *text = (char *)userdata;
     if (text) {
@@ -278,9 +278,8 @@ int SDL_SetClipboardText(const char *text)
         text_mime_types = SDL_GetTextMimeTypes(_this, &num_mime_types);
 
         return SDL_SetClipboardData(SDL_ClipboardTextCallback, SDL_free, SDL_strdup(text), text_mime_types, num_mime_types);
-    } else {
-        return SDL_ClearClipboardData();
     }
+    return SDL_ClearClipboardData();
 }
 
 char *SDL_GetClipboardText(void)
@@ -298,8 +297,9 @@ char *SDL_GetClipboardText(void)
 
     text_mime_types = SDL_GetTextMimeTypes(_this, &num_mime_types);
     for (i = 0; i < num_mime_types; ++i) {
-        text = SDL_GetClipboardData(text_mime_types[i], &length);
-        if (text) {
+        void *clipdata = SDL_GetClipboardData(text_mime_types[i], &length);
+        if (clipdata) {
+            text = (char *)clipdata;
             break;
         }
     }

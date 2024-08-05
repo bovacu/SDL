@@ -109,7 +109,6 @@ static SDL_bool HIDAPI_DriverStadia_OpenJoystick(SDL_HIDAPI_Device *device, SDL_
     joystick->nbuttons = SDL_GAMEPAD_NUM_STADIA_BUTTONS;
     joystick->naxes = SDL_GAMEPAD_AXIS_MAX;
     joystick->nhats = 1;
-    joystick->epowerlevel = SDL_JOYSTICK_POWER_WIRED;
 
     return SDL_TRUE;
 }
@@ -267,7 +266,7 @@ static SDL_bool HIDAPI_DriverStadia_UpdateDevice(SDL_HIDAPI_Device *device)
     int size = 0;
 
     if (device->num_joysticks > 0) {
-        joystick = SDL_GetJoystickFromInstanceID(device->joysticks[0]);
+        joystick = SDL_GetJoystickFromID(device->joysticks[0]);
     } else {
         return SDL_FALSE;
     }

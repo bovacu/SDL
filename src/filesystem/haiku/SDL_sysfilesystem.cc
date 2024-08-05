@@ -25,6 +25,10 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* System dependent filesystem routines                                */
 
+extern "C" {
+#include "../SDL_sysfilesystem.h"
+}
+
 #include <kernel/image.h>
 #include <storage/Directory.h>
 #include <storage/Entry.h>
@@ -32,7 +36,7 @@
 #include <storage/Path.h>
 
 
-char *SDL_GetBasePath(void)
+char *SDL_SYS_GetBasePath(void)
 {
     char name[MAXPATHLEN];
 
@@ -51,18 +55,17 @@ char *SDL_GetBasePath(void)
 
     const size_t len = SDL_strlen(str);
     char *retval = (char *) SDL_malloc(len + 2);
-    if (!retval) {
-        return NULL;
+    if (retval) {
+        SDL_memcpy(retval, str, len);
+        retval[len] = '/';
+        retval[len+1] = '\0';
     }
 
-    SDL_memcpy(retval, str, len);
-    retval[len] = '/';
-    retval[len+1] = '\0';
     return retval;
 }
 
 
-char *SDL_GetPrefPath(const char *org, const char *app)
+char *SDL_SYS_GetPrefPath(const char *org, const char *app)
 {
     // !!! FIXME: is there a better way to do this?
     const char *home = SDL_getenv("HOME");
@@ -94,7 +97,7 @@ char *SDL_GetPrefPath(const char *org, const char *app)
     return retval;
 }
 
-char *SDL_GetUserFolder(SDL_Folder folder)
+char *SDL_SYS_GetUserFolder(SDL_Folder folder)
 {
     const char *home = NULL;
     char *retval;
@@ -107,15 +110,30 @@ char *SDL_GetUserFolder(SDL_Folder folder)
 
     switch (folder) {
     case SDL_FOLDER_HOME:
-        return SDL_strdup(home);
+        retval = (char *) SDL_malloc(SDL_strlen(home) + 2);
+        if (!retval) {
+            return NULL;
+        }
+
+        if (SDL_snprintf(retval, SDL_strlen(home) + 2, "%s/", home) < 0) {
+            SDL_SetError("Couldn't snprintf home path for Haiku: %s", home);
+            SDL_free(retval);
+            return NULL;
+        }
+
+        return retval;
 
         /* TODO: Is Haiku's desktop folder always ~/Desktop/ ? */
     case SDL_FOLDER_DESKTOP:
         retval = (char *) SDL_malloc(SDL_strlen(home) + 10);
+        if (!retval) {
+            return NULL;
+        }
 
-        if (retval) {
-            SDL_strlcpy(retval, home, SDL_strlen(home) + 10);
-            SDL_strlcat(retval, "/Desktop/", SDL_strlen(home) + 10);
+        if (SDL_snprintf(retval, SDL_strlen(home) + 10, "%s/Desktop/", home) < 0) {
+            SDL_SetError("Couldn't snprintf desktop path for Haiku: %s/Desktop/", home);
+            SDL_free(retval);
+            return NULL;
         }
 
         return retval;

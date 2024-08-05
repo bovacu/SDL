@@ -8,14 +8,15 @@ The CMake build system is supported on the following platforms:
 * Linux
 * Microsoft Visual C
 * MinGW and Msys
-* macOS, iOS, and tvOS, with support for XCode
+* macOS, iOS, tvOS, and visionOS with support for XCode
 * Android
 * Emscripten
-* FreeBSD
+* NetBSD
 * Haiku
 * Nintendo 3DS
-* Playstation 2
-* Playstation Vita
+* PlayStation 2
+* PlayStation Portable
+* PlayStation Vita
 * QNX 7.x/8.x
 * RiscOS
 
@@ -42,6 +43,14 @@ You can build the SDL test programs by adding `-DSDL_TESTS=ON` to the first cmak
 cmake -S ~/sdl -B ~/build -DSDL_TEST_LIBRARY=ON -DSDL_TESTS=ON
 ```
 and then building normally. In this example, the test programs will be built and can be run from `~/build/tests/`.
+
+### Building SDL examples
+
+You can build the SDL example programs by adding `-DSDL_EXAMPLES=ON` to the first cmake command above:
+```sh
+cmake -S ~/sdl -B ~/build -DSDL_EXAMPLES=ON
+```
+and then building normally. In this example, the example programs will be built and can be run from `~/build/examples/`.
 
 ## Including SDL in your project
 
@@ -89,6 +98,8 @@ The following components are available, to be used as an argument of `find_packa
 | SDL3           | The SDL3 library, available through the `SDL3::SDL3` target. This is an alias of `SDL3::SDL3-shared` or `SDL3::SDL3-static`. This component is always available. |
 | Headers        | The SDL3 headers, available through the `SDL3::Headers` target. This component is always available.                                                              |
 
+SDL's CMake support guarantees a `SDL3::SDL3` target.
+Neither `SDL3::SDL3-shared` nor `SDL3::SDL3-static` are guaranteed to exist.
 
 ### Using a vendored SDL
 
@@ -113,8 +124,12 @@ cmake --build . --config Release
 
 ### Shared or static
 
-By default, only a shared SDL library is built and installed.
+By default, only a dynamic (=shared) SDL library is built and installed.
 The options `-DSDL_SHARED=` and `-DSDL_STATIC=` accept boolean values to change this.
+
+Exceptions exist:
+- some platforms don't support dynamic libraries, so only `-DSDL_STATIC=ON` makes sense.
+- a static Apple framework is not supported
 
 ### Pass custom compile options to the compiler
 
@@ -136,26 +151,87 @@ flags to the compiler.
     cmake .. -DCMAKE_C_FLAGS="/ARCH:AVX2" -DCMAKE_CXX_FLAGS="/ARCH:AVX2"
     ```
 
-### iOS/tvOS
+### Apple
 
-CMake 3.14+ natively includes support for iOS and tvOS.  SDL binaries may be built
-using Xcode or Make, possibly among other build-systems.
+CMake documentation for cross building for Apple:
+[link](https://cmake.org/cmake/help/latest/manual/cmake-toolchains.7.html#cross-compiling-for-ios-tvos-visionos-or-watchos)
 
-When using a recent version of CMake (3.14+), it should be possible to:
+#### iOS/tvOS/visionOS
 
-- build SDL for iOS, both static and dynamic
-- build SDL test apps (as iOS/tvOS .app bundles)
-- generate a working SDL_build_config.h for iOS (using SDL_build_config.h.cmake as a basis)
+CMake 3.14+ natively includes support for iOS, tvOS and watchOS. visionOS requires CMake 3.28+.
+SDL binaries may be built using Xcode or Make, possibly among other build-systems.
 
-To use, set the following CMake variables when running CMake's configuration stage:
+When using a compatible version of CMake, it should be possible to:
 
-- `CMAKE_SYSTEM_NAME=<OS>`   (either `iOS` or `tvOS`)
-- `CMAKE_OSX_SYSROOT=<SDK>`  (examples: `iphoneos`, `iphonesimulator`, `iphoneos12.4`, `/full/path/to/iPhoneOS.sdk`,
-                              `appletvos`, `appletvsimulator`, `appletvos12.4`, `/full/path/to/AppleTVOS.sdk`, etc.)
-- `CMAKE_OSX_ARCHITECTURES=<semicolon-separated list of CPU architectures>` (example: "arm64;armv7s;x86_64")
+- build SDL dylibs, both static and dynamic dylibs
+- build SDL frameworks, only shared
+- build SDL test apps
 
+#### Frameworks
+
+Configure with `-DSDL_FRAMEWORK=ON` to build a SDL framework instead of a dylib shared library.
+Only shared frameworks are supported, no static ones.
+
+#### Platforms
+
+Use `-DCMAKE_PLATFORM_NAME=<value>` to configure the platform. CMake can target only one platform at a time.
+
+| Apple platform  | `CMAKE_SYSTEM_NAME` value |
+|-----------------|---------------------------|
+| macOS (MacOS X) | `Darwin`                  |
+| iOS             | `iOS`                     |
+| tvOS            | `tvOS`                    |
+| visionOS        | `visionOS`                |
+| watchOS         | `watchOS`                 |
+
+#### Universal binaries
+
+A universal binaries, can be built by configuring CMake with
+`-DCMAKE_OSX_ARCHITECTURES=<semicolon-separated list of CPU architectures>`.
+
+For example `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` will build binaries that run on both Intel cpus and Apple silicon.
+
+SDL supports following Apple architectures:
+
+| Platform                   | `CMAKE_OSX_ARCHITECTURES` value |
+|----------------------------|---------------------------------|
+| 64-bit ARM (Apple Silicon) | `arm64`                         |
+| x86_64                     | `x86_64`                        |
+| 32-bit ARM                 | `armv7s`                        |
+
+CMake documentation: [link](https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_ARCHITECTURES.html)
+
+#### Simulators and/or non-default maxOS platform SDK
+
+Use `-DCMAKE_OSX_SYSROOT=<value>` to configure a different platform SDK.
+The value can be either the name of the SDK, or a full path to the sdk (e.g. `/full/path/to/iPhoneOS.sdk`).
+
+| SDK                  | `CMAKE_OSX_SYSROOT` value |
+|----------------------|---------------------------|
+| iphone               | `iphoneos`                |
+| iphonesimulator      | `iphonesimulator`         |
+| appleTV              | `appletvos`               |
+| appleTV simulator    | `appletvsimulator`        |
+| visionOS             | `xr`                      |
+| visionOS simulator   | `xrsimulator`             |
+| watchOS              | `watchos`                 |
+| watchOS simulator    | `watchsimulator`          |
+
+Append with a version number to target a specific SDK revision: e.g. `iphoneos12.4`, `appletvos12.4`.
+
+CMake documentation: [link](https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_SYSROOT.html)
 
 #### Examples
+
+- for macOS, building a dylib and/or static library for x86_64 and arm64:
+
+    ```bash
+    cmake ~/sdl -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+
+- for macOS, building an universal framework for x86_64 and arm64:
+
+    ```bash
+    cmake ~/sdl -DSDL_FRAMEWORK=ON -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 
 - for iOS-Simulator, using the latest, installed SDK:
 
@@ -221,6 +297,32 @@ At the end of SDL CMake configuration, a table shows all CMake options along wit
 | `-DSDL_DISABLE_INSTALL_DOCS=` | `ON`/`OFF`   | Don't install the SDL documentation                                                                 |
 | `-DSDL_INSTALL_TESTS=`        | `ON`/`OFF`   | Install the SDL test programs                                                                       |
 
+## CMake FAQ
+
+### How do I copy a SDL3 dynamic library to another location?
+
+Use [CMake generator expressions](https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#target-dependent-expressions).
+Generator expressions support multiple configurations, and are evaluated during build system generation time.
+
+On Windows, the following example this copies `SDL3.dll` to the directory where `mygame.exe` is built.
+On Unix systems, `$<TARGET_FILE:...>` will refer to the dynamic library (or framework).
+```cmake
+if(WIN32)
+    add_custom_command(
+        TARGET mygame POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:mygame>
+        VERBATIM
+    )
+endif()
+```
+
+### Linking against a static SDL library fails due to relocation errors
+
+On unix platforms, all code that ends up in shared libraries needs to be built as relocatable (=position independent) code.
+However, by default CMake builds static libraries as non-relocatable.
+Configuring SDL with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` will result in a static `libSDL3.a` library
+which you can link against to create a shared library.
+
 ## Help, it doesn't work!
 
 Below, a SDL3 CMake project can be found that builds 99.9% of time (assuming you have internet connectivity).
@@ -245,7 +347,7 @@ endif()
 
 # 2. Try using a vendored SDL library
 if(NOT SDL3_FOUND AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/SDL/CMakeLists.txt")
-    add_subdirectory(SDL)
+    add_subdirectory(SDL EXCLUDE_FROM_ALL)
     message(STATUS "Using SDL3 via add_subdirectory")
     set(SDL3_FOUND TRUE)
 endif()
@@ -275,9 +377,15 @@ file(WRITE main.c [===========================================[
 /* START of source modifications */
 
 #include <SDL3/SDL.h>
+/*
+ * SDL3/SDL_main.h is explicitly not included such that a terminal window would appear on Windows.
+ */
 
 int main(int argc, char *argv[]) {
-    if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
+    (void)argc;
+    (void)argv;
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         SDL_Log("SDL_Init failed (%s)", SDL_GetError());
         return 1;
     }
@@ -285,12 +393,11 @@ int main(int argc, char *argv[]) {
     SDL_Window *window = NULL;
     SDL_Renderer *renderer = NULL;
 
-    if (SDL_CreateWindowAndRenderer(640, 480, 0, &window, &renderer) < 0) {
+    if (SDL_CreateWindowAndRenderer("SDL issue", 640, 480, 0, &window, &renderer) < 0) {
         SDL_Log("SDL_CreateWindowAndRenderer failed (%s)", SDL_GetError());
         SDL_Quit();
         return 1;
     }
-    SDL_SetWindowTitle(window, "SDL issue");
 
     while (1) {
         int finished = 0;
@@ -314,6 +421,7 @@ int main(int argc, char *argv[]) {
     SDL_DestroyWindow(window);
 
     SDL_Quit();
+    return 0;
 }
 
 /* END of source modifications */

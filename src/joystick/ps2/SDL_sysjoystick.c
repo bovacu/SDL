@@ -122,6 +122,7 @@ static int PS2_JoystickInit(void)
                 info->slot = (uint8_t)slot;
                 info->opened = 1;
                 enabled_pads++;
+                SDL_PrivateJoystickAdded(enabled_pads);
             }
         }
     }
@@ -130,14 +131,20 @@ static int PS2_JoystickInit(void)
 }
 
 /* Function to return the number of joystick devices plugged in right now */
-static int PS2_JoystickGetCount()
+static int PS2_JoystickGetCount(void)
 {
     return (int)enabled_pads;
 }
 
 /* Function to cause any queued joystick insertions to be processed */
-static void PS2_JoystickDetect()
+static void PS2_JoystickDetect(void)
 {
+}
+
+static SDL_bool PS2_JoystickIsDevicePresent(Uint16 vendor_id, Uint16 product_id, Uint16 version, const char *name)
+{
+    /* We don't override any other drivers */
+    return SDL_FALSE;
 }
 
 /* Function to get the device-dependent name of a joystick */
@@ -175,7 +182,7 @@ static void PS2_JoystickSetDevicePlayerIndex(int device_index, int player_index)
 }
 
 /* Function to return the stable GUID for a plugged in device */
-static SDL_JoystickGUID PS2_JoystickGetDeviceGUID(int device_index)
+static SDL_GUID PS2_JoystickGetDeviceGUID(int device_index)
 {
     /* the GUID is just the name for now */
     const char *name = PS2_JoystickGetDeviceName(device_index);
@@ -208,7 +215,6 @@ static int PS2_JoystickOpen(SDL_Joystick *joystick, int device_index)
     joystick->nbuttons = PS2_BUTTONS;
     joystick->naxes = PS2_TOTAL_AXIS;
     joystick->nhats = 0;
-    joystick->instance_id = device_index;
 
     SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), SDL_PROP_JOYSTICK_CAP_RUMBLE_BOOLEAN, SDL_TRUE);
 
@@ -341,6 +347,7 @@ SDL_JoystickDriver SDL_PS2_JoystickDriver = {
     PS2_JoystickInit,
     PS2_JoystickGetCount,
     PS2_JoystickDetect,
+    PS2_JoystickIsDevicePresent,
     PS2_JoystickGetDeviceName,
     PS2_JoystickGetDevicePath,
     PS2_JoystickGetDeviceSteamVirtualGamepadSlot,

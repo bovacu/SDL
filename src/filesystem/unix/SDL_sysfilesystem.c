@@ -25,6 +25,9 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* System dependent filesystem routines                                */
 
+#include "../SDL_sysfilesystem.h"
+
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -71,18 +74,19 @@ static char *readSymLink(const char *path)
 #ifdef SDL_PLATFORM_OPENBSD
 static char *search_path_for_binary(const char *bin)
 {
-    char *envr = SDL_getenv("PATH");
+    const char *envr_real = SDL_getenv("PATH");
+    char *envr;
     size_t alloc_size;
     char *exe = NULL;
     char *start = envr;
     char *ptr;
 
-    if (!envr) {
+    if (!envr_real) {
         SDL_SetError("No $PATH set");
         return NULL;
     }
 
-    envr = SDL_strdup(envr);
+    envr = SDL_strdup(envr_real);
     if (!envr) {
         return NULL;
     }
@@ -118,7 +122,7 @@ static char *search_path_for_binary(const char *bin)
 }
 #endif
 
-char *SDL_GetBasePath(void)
+char *SDL_SYS_GetBasePath(void)
 {
     char *retval = NULL;
 
@@ -252,7 +256,7 @@ char *SDL_GetBasePath(void)
     return retval;
 }
 
-char *SDL_GetPrefPath(const char *org, const char *app)
+char *SDL_SYS_GetPrefPath(const char *org, const char *app)
 {
     /*
      * We use XDG's base directory spec, even if you're not on Linux.
@@ -355,7 +359,8 @@ char *SDL_GetPrefPath(const char *org, const char *app)
 static char *xdg_user_dir_lookup_with_fallback (const char *type, const char *fallback)
 {
   FILE *file;
-  char *home_dir, *config_home, *config_file;
+  const char *home_dir, *config_home;
+  char *config_file;
   char buffer[512];
   char *user_dir;
   char *p, *d;
@@ -483,7 +488,8 @@ error2:
 
 static char *xdg_user_dir_lookup (const char *type)
 {
-    char *dir, *home_dir, *user_dir;
+    const char *home_dir;
+    char *dir, *user_dir;
 
     dir = xdg_user_dir_lookup_with_fallback(type, NULL);
     if (dir)
@@ -495,25 +501,25 @@ static char *xdg_user_dir_lookup (const char *type)
         return NULL;
 
     /* Special case desktop for historical compatibility */
-    if (SDL_strcmp(type, "DESKTOP") == 0)
-    {
-        user_dir = (char*) SDL_malloc(SDL_strlen(home_dir) +
-                                      SDL_strlen("/Desktop") + 1);
+    if (SDL_strcmp(type, "DESKTOP") == 0) {
+        size_t length = SDL_strlen(home_dir) + SDL_strlen("/Desktop") + 1;
+        user_dir = (char*) SDL_malloc(length);
         if (!user_dir)
             return NULL;
 
-        strcpy(user_dir, home_dir);
-        strcat(user_dir, "/Desktop");
+        SDL_strlcpy(user_dir, home_dir, length);
+        SDL_strlcat(user_dir, "/Desktop", length);
         return user_dir;
     }
 
     return NULL;
 }
 
-char *SDL_GetUserFolder(SDL_Folder folder)
+char *SDL_SYS_GetUserFolder(SDL_Folder folder)
 {
     const char *param = NULL;
     char *retval;
+    char *newretval;
 
     /* According to `man xdg-user-dir`, the possible values are:
         DESKTOP
@@ -534,7 +540,8 @@ char *SDL_GetUserFolder(SDL_Folder folder)
             return NULL;
         }
 
-        return SDL_strdup(param);
+        retval = SDL_strdup(param);
+        goto append_slash;
 
     case SDL_FOLDER_DESKTOP:
         param = "DESKTOP";
@@ -593,6 +600,17 @@ char *SDL_GetUserFolder(SDL_Folder folder)
         SDL_SetError("XDG directory not available");
         return NULL;
     }
+
+append_slash:
+    newretval = (char *) SDL_realloc(retval, SDL_strlen(retval) + 2);
+
+    if (!newretval) {
+        SDL_free(retval);
+        return NULL;
+    }
+
+    retval = newretval;
+    SDL_strlcat(retval, "/", SDL_strlen(retval) + 2);
 
     return retval;
 }

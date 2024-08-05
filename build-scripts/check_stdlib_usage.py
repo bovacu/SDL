@@ -42,6 +42,7 @@ words = [
     'atanf',
     'atof',
     'atoi',
+    'bsearch',
     'calloc',
     'ceil',
     'ceilf',
@@ -90,6 +91,8 @@ words = [
     'pow',
     'powf',
     'qsort',
+    'qsort_r',
+    'qsort_s',
     'realloc',
     'round',
     'roundf',
@@ -205,7 +208,7 @@ def find_symbols_in_file(file, regex):
 
                     # double check
                     # Remove one line comment /* ... */
-                    # eg: extern DECLSPEC SDL_hid_device * SDLCALL SDL_hid_open_path(const char *path, int bExclusive /* = false */);
+                    # eg: extern SDL_DECLSPEC SDL_hid_device * SDLCALL SDL_hid_open_path(const char *path, int bExclusive /* = false */);
                     l = reg_comment_remove_content.sub('', l)
 
                     # Remove strings " ... "

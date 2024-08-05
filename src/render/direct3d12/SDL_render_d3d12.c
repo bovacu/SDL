@@ -20,7 +20,7 @@
 */
 #include "SDL_internal.h"
 
-#if defined(SDL_VIDEO_RENDER_D3D12) && !defined(SDL_RENDER_DISABLED)
+#if SDL_VIDEO_RENDER_D3D12
 
 #define SDL_D3D12_NUM_BUFFERS        2
 #define SDL_D3D12_NUM_VERTEX_BUFFERS 256
@@ -31,18 +31,10 @@
 #include "../../video/windows/SDL_windowswindow.h"
 #include "../SDL_sysrender.h"
 #include "../SDL_d3dmath.h"
-#include "../../video/SDL_pixels_c.h"
+#include "../../video/directx/SDL_d3d12.h"
 
 #if defined(SDL_PLATFORM_XBOXONE) || defined(SDL_PLATFORM_XBOXSERIES)
 #include "SDL_render_d3d12_xbox.h"
-#ifndef D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
-#define D3D12_TEXTURE_DATA_PITCH_ALIGNMENT 256
-#endif
-#else
-#include <d3d12.h>
-#include <dxgi1_6.h>
-#include <dxgidebug.h>
-#include <d3d12sdklayers.h>
 #endif
 
 #include "SDL_shaders_d3d12.h"
@@ -53,33 +45,26 @@
 #define SDL_COMPOSE_ERROR(str) SDL_STRINGIFY_ARG(__FUNCTION__) ", " str
 #endif
 
-#ifdef __cplusplus
-#define SAFE_RELEASE(X) \
-    if (X) {            \
-        (X)->Release(); \
-        X = NULL;       \
-    }
-#define D3D_CALL(THIS, FUNC, ...)             (THIS)->FUNC(__VA_ARGS__)
-#define D3D_CALL_RET(THIS, FUNC, RETVAL, ...) *(RETVAL) = (THIS)->FUNC(__VA_ARGS__)
-#define D3D_GUID(X)                           (X)
-#else
-#define SAFE_RELEASE(X)          \
-    if (X) {                     \
-        (X)->lpVtbl->Release(X); \
-        X = NULL;                \
-    }
-#define D3D_CALL(THIS, FUNC, ...)     (THIS)->lpVtbl->FUNC((THIS), ##__VA_ARGS__)
-#define D3D_CALL_RET(THIS, FUNC, ...) (THIS)->lpVtbl->FUNC((THIS), ##__VA_ARGS__)
-#define D3D_GUID(X)                   &(X)
-#endif
-
 /* Set up for C function definitions, even when using C++ */
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* This must be included here as the function definitions in SDL_pixels.c/_c.h are C, not C++ */
+#include "../../video/SDL_pixels_c.h"
+
 /* !!! FIXME: vertex buffer bandwidth could be lower; only use UV coords when
    !!! FIXME:  textures are needed. */
+
+/* Sampler types */
+typedef enum
+{
+    SDL_D3D12_SAMPLER_NEAREST_CLAMP,
+    SDL_D3D12_SAMPLER_NEAREST_WRAP,
+    SDL_D3D12_SAMPLER_LINEAR_CLAMP,
+    SDL_D3D12_SAMPLER_LINEAR_WRAP,
+    SDL_D3D12_NUM_SAMPLERS
+} SDL_D3D12_sampler_type;
 
 /* Vertex shader, common values */
 typedef struct
@@ -88,12 +73,34 @@ typedef struct
     Float4X4 projectionAndView;
 } VertexShaderConstants;
 
+/* These should mirror the definitions in D3D12_PixelShader_Common.hlsli */
+//static const float TONEMAP_NONE = 0;
+//static const float TONEMAP_LINEAR = 1;
+static const float TONEMAP_CHROME = 2;
+
+//static const float TEXTURETYPE_NONE = 0;
+static const float TEXTURETYPE_RGB = 1;
+static const float TEXTURETYPE_NV12 = 2;
+static const float TEXTURETYPE_NV21 = 3;
+static const float TEXTURETYPE_YUV = 4;
+
+static const float INPUTTYPE_UNSPECIFIED = 0;
+static const float INPUTTYPE_SRGB = 1;
+static const float INPUTTYPE_SCRGB = 2;
+static const float INPUTTYPE_HDR10 = 3;
+
 typedef struct
 {
     float scRGB_output;
+    float texture_type;
+    float input_type;
     float color_scale;
-    float unused1;
-    float unused2;
+
+    float tonemap_method;
+    float tonemap_factor1;
+    float tonemap_factor2;
+    float sdr_white_point;
+
     float YCbCr_matrix[16];
 } PixelShaderConstants;
 
@@ -119,7 +126,7 @@ typedef struct
     D3D12_RESOURCE_STATES stagingResourceState;
     D3D12_FILTER scaleMode;
     D3D12_Shader shader;
-    const float *shader_params;
+    const float *YCbCr_matrix;
 #if SDL_HAVE_YUV
     /* YV12 texture support */
     SDL_bool yuv;
@@ -147,9 +154,7 @@ typedef struct
 typedef struct
 {
     D3D12_Shader shader;
-    SDL_bool scRGB_output;
-    float color_scale;
-    const float *shader_params;
+    PixelShaderConstants shader_constants;
     SDL_BlendMode blendMode;
     D3D12_PRIMITIVE_TOPOLOGY_TYPE topology;
     DXGI_FORMAT rtvFormat;
@@ -190,6 +195,8 @@ typedef struct
     ID3D12GraphicsCommandList2 *commandList;
     DXGI_SWAP_EFFECT swapEffect;
     UINT swapFlags;
+    UINT syncInterval;
+    UINT presentFlags;
     DXGI_FORMAT renderTargetFormat;
     SDL_bool pixelSizeChanged;
 
@@ -219,8 +226,7 @@ typedef struct
     D3D12_PipelineState *currentPipelineState;
 
     D3D12_VertexBuffer vertexBuffers[SDL_D3D12_NUM_VERTEX_BUFFERS];
-    D3D12_CPU_DESCRIPTOR_HANDLE nearestPixelSampler;
-    D3D12_CPU_DESCRIPTOR_HANDLE linearSampler;
+    D3D12_CPU_DESCRIPTOR_HANDLE samplers[SDL_D3D12_NUM_SAMPLERS];
 
     /* Data for staging/allocating textures */
     ID3D12Resource *uploadBuffers[SDL_D3D12_NUM_UPLOAD_BUFFERS];
@@ -281,12 +287,12 @@ static const GUID SDL_IID_ID3D12InfoQueue = { 0x0742a90b, 0xc387, 0x483f, { 0xb9
 #pragma GCC diagnostic pop
 #endif
 
-UINT D3D12_Align(UINT location, UINT alignment)
+static UINT D3D12_Align(UINT location, UINT alignment)
 {
     return (location + (alignment - 1)) & ~(alignment - 1);
 }
 
-Uint32 D3D12_DXGIFormatToSDLPixelFormat(DXGI_FORMAT dxgiFormat)
+static SDL_PixelFormat D3D12_DXGIFormatToSDLPixelFormat(DXGI_FORMAT dxgiFormat)
 {
     switch (dxgiFormat) {
     case DXGI_FORMAT_B8G8R8A8_UNORM:
@@ -309,13 +315,15 @@ static DXGI_FORMAT SDLPixelFormatToDXGITextureFormat(Uint32 format, Uint32 color
     switch (format) {
     case SDL_PIXELFORMAT_RGBA64_FLOAT:
         return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case SDL_PIXELFORMAT_XBGR2101010:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
     case SDL_PIXELFORMAT_ARGB8888:
-        if (colorspace == SDL_COLORSPACE_SCRGB) {
+        if (colorspace == SDL_COLORSPACE_SRGB_LINEAR) {
             return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
         }
         return DXGI_FORMAT_B8G8R8A8_UNORM;
     case SDL_PIXELFORMAT_XRGB8888:
-        if (colorspace == SDL_COLORSPACE_SCRGB) {
+        if (colorspace == SDL_COLORSPACE_SRGB_LINEAR) {
             return DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
         }
         return DXGI_FORMAT_B8G8R8X8_UNORM;
@@ -327,8 +335,6 @@ static DXGI_FORMAT SDLPixelFormatToDXGITextureFormat(Uint32 format, Uint32 color
         return DXGI_FORMAT_NV12;
     case SDL_PIXELFORMAT_P010:
         return DXGI_FORMAT_P010;
-    case SDL_PIXELFORMAT_P016:
-        return DXGI_FORMAT_P016;
     default:
         return DXGI_FORMAT_UNKNOWN;
     }
@@ -339,13 +345,15 @@ static DXGI_FORMAT SDLPixelFormatToDXGIMainResourceViewFormat(Uint32 format, Uin
     switch (format) {
     case SDL_PIXELFORMAT_RGBA64_FLOAT:
         return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case SDL_PIXELFORMAT_XBGR2101010:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
     case SDL_PIXELFORMAT_ARGB8888:
-        if (colorspace == SDL_COLORSPACE_SCRGB) {
+        if (colorspace == SDL_COLORSPACE_SRGB_LINEAR) {
             return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
         }
         return DXGI_FORMAT_B8G8R8A8_UNORM;
     case SDL_PIXELFORMAT_XRGB8888:
-        if (colorspace == SDL_COLORSPACE_SCRGB) {
+        if (colorspace == SDL_COLORSPACE_SRGB_LINEAR) {
             return DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
         }
         return DXGI_FORMAT_B8G8R8X8_UNORM;
@@ -355,7 +363,6 @@ static DXGI_FORMAT SDLPixelFormatToDXGIMainResourceViewFormat(Uint32 format, Uin
     case SDL_PIXELFORMAT_NV21: /* For the Y texture */
         return DXGI_FORMAT_R8_UNORM;
     case SDL_PIXELFORMAT_P010:  /* For the Y texture */
-    case SDL_PIXELFORMAT_P016:  /* For the Y texture */
         return DXGI_FORMAT_R16_UNORM;
     default:
         return DXGI_FORMAT_UNKNOWN;
@@ -366,12 +373,12 @@ static void D3D12_DestroyTexture(SDL_Renderer *renderer, SDL_Texture *texture);
 
 static void D3D12_ReleaseAll(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     SDL_Texture *texture = NULL;
 
     SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
-    SDL_SetProperty(props, SDL_PROP_RENDERER_D3D12_DEVICE_POINTER, NULL);
-    SDL_SetProperty(props, SDL_PROP_RENDERER_D3D12_COMMAND_QUEUE_POINTER, NULL);
+    SDL_SetPointerProperty(props, SDL_PROP_RENDERER_D3D12_DEVICE_POINTER, NULL);
+    SDL_SetPointerProperty(props, SDL_PROP_RENDERER_D3D12_COMMAND_QUEUE_POINTER, NULL);
 
     /* Release all textures */
     for (texture = renderer->textures; texture; texture = texture->next) {
@@ -383,39 +390,39 @@ static void D3D12_ReleaseAll(SDL_Renderer *renderer)
         int i;
 
 #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
-        SAFE_RELEASE(data->dxgiFactory);
-        SAFE_RELEASE(data->dxgiAdapter);
-        SAFE_RELEASE(data->swapChain);
+        D3D_SAFE_RELEASE(data->dxgiFactory);
+        D3D_SAFE_RELEASE(data->dxgiAdapter);
+        D3D_SAFE_RELEASE(data->swapChain);
 #endif
-        SAFE_RELEASE(data->d3dDevice);
-        SAFE_RELEASE(data->debugInterface);
-        SAFE_RELEASE(data->commandQueue);
-        SAFE_RELEASE(data->commandList);
-        SAFE_RELEASE(data->rtvDescriptorHeap);
-        SAFE_RELEASE(data->textureRTVDescriptorHeap);
-        SAFE_RELEASE(data->srvDescriptorHeap);
-        SAFE_RELEASE(data->samplerDescriptorHeap);
-        SAFE_RELEASE(data->fence);
+        D3D_SAFE_RELEASE(data->d3dDevice);
+        D3D_SAFE_RELEASE(data->debugInterface);
+        D3D_SAFE_RELEASE(data->commandQueue);
+        D3D_SAFE_RELEASE(data->commandList);
+        D3D_SAFE_RELEASE(data->rtvDescriptorHeap);
+        D3D_SAFE_RELEASE(data->textureRTVDescriptorHeap);
+        D3D_SAFE_RELEASE(data->srvDescriptorHeap);
+        D3D_SAFE_RELEASE(data->samplerDescriptorHeap);
+        D3D_SAFE_RELEASE(data->fence);
 
         for (i = 0; i < SDL_D3D12_NUM_BUFFERS; ++i) {
-            SAFE_RELEASE(data->commandAllocators[i]);
-            SAFE_RELEASE(data->renderTargets[i]);
+            D3D_SAFE_RELEASE(data->commandAllocators[i]);
+            D3D_SAFE_RELEASE(data->renderTargets[i]);
         }
 
         if (data->pipelineStateCount > 0) {
             for (i = 0; i < data->pipelineStateCount; ++i) {
-                SAFE_RELEASE(data->pipelineStates[i].pipelineState);
+                D3D_SAFE_RELEASE(data->pipelineStates[i].pipelineState);
             }
             SDL_free(data->pipelineStates);
             data->pipelineStateCount = 0;
         }
 
         for (i = 0; i < NUM_ROOTSIGS; ++i) {
-            SAFE_RELEASE(data->rootSignatures[i]);
+            D3D_SAFE_RELEASE(data->rootSignatures[i]);
         }
 
         for (i = 0; i < SDL_D3D12_NUM_VERTEX_BUFFERS; ++i) {
-            SAFE_RELEASE(data->vertexBuffers[i].resource);
+            D3D_SAFE_RELEASE(data->vertexBuffers[i].resource);
             data->vertexBuffers[i].size = 0;
         }
 
@@ -429,7 +436,7 @@ static void D3D12_ReleaseAll(SDL_Renderer *renderer)
         if (data->dxgiDebug) {
             DXGI_DEBUG_RLO_FLAGS rloFlags = (DXGI_DEBUG_RLO_FLAGS)(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL);
             D3D_CALL(data->dxgiDebug, ReportLiveObjects, SDL_DXGI_DEBUG_ALL, rloFlags);
-            SAFE_RELEASE(data->dxgiDebug);
+            D3D_SAFE_RELEASE(data->dxgiDebug);
         }
 #endif
 
@@ -480,7 +487,7 @@ static void D3D12_WaitForGPU(D3D12_RenderData *data)
 
 static D3D12_CPU_DESCRIPTOR_HANDLE D3D12_GetCurrentRenderTargetView(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     D3D12_CPU_DESCRIPTOR_HANDLE rtvDescriptor;
 
     if (data->textureRenderTarget) {
@@ -530,7 +537,7 @@ static void D3D12_ResetCommandList(D3D12_RenderData *data)
 
     /* Release any upload buffers that were inflight */
     for (i = 0; i < data->currentUploadBuffer; ++i) {
-        SAFE_RELEASE(data->uploadBuffers[i]);
+        D3D_SAFE_RELEASE(data->uploadBuffers[i]);
     }
     data->currentUploadBuffer = 0;
 
@@ -558,13 +565,12 @@ static int D3D12_IssueBatch(D3D12_RenderData *data)
 
 static void D3D12_DestroyRenderer(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_WaitForGPU(data);
-    D3D12_ReleaseAll(renderer);
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     if (data) {
+        D3D12_WaitForGPU(data);
+        D3D12_ReleaseAll(renderer);
         SDL_free(data);
     }
-    SDL_free(renderer);
 }
 
 static D3D12_BLEND GetBlendFunc(SDL_BlendFactor factor)
@@ -646,7 +652,7 @@ static D3D12_PipelineState *D3D12_CreatePipelineState(SDL_Renderer *renderer,
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc;
     ID3D12PipelineState *pipelineState = NULL;
     D3D12_PipelineState *pipelineStates;
@@ -690,7 +696,7 @@ static D3D12_PipelineState *D3D12_CreatePipelineState(SDL_Renderer *renderer,
 
     pipelineStates = (D3D12_PipelineState *)SDL_realloc(data->pipelineStates, (data->pipelineStateCount + 1) * sizeof(*pipelineStates));
     if (!pipelineStates) {
-        SAFE_RELEASE(pipelineState);
+        D3D_SAFE_RELEASE(pipelineState);
         return NULL;
     }
 
@@ -711,7 +717,7 @@ static HRESULT D3D12_CreateVertexBuffer(D3D12_RenderData *data, size_t vbidx, si
     D3D12_RESOURCE_DESC vbufferDesc;
     HRESULT result;
 
-    SAFE_RELEASE(data->vertexBuffers[vbidx].resource);
+    D3D_SAFE_RELEASE(data->vertexBuffers[vbidx].resource);
 
     SDL_zero(vbufferHeapProps);
     vbufferHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -763,7 +769,7 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
     typedef HANDLE(WINAPI * PFN_CREATE_EVENT_EX)(LPSECURITY_ATTRIBUTES lpEventAttributes, LPCWSTR lpName, DWORD dwFlags, DWORD dwDesiredAccess);
     PFN_CREATE_EVENT_EX CreateEventExFunc;
 
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     ID3D12Device *d3dDevice = NULL;
     HRESULT result = S_OK;
     UINT creationFlags = 0;
@@ -867,7 +873,7 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
 
         D3D_CALL(dxgiInfoQueue, SetBreakOnSeverity, SDL_DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, TRUE);
         D3D_CALL(dxgiInfoQueue, SetBreakOnSeverity, SDL_DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-        SAFE_RELEASE(dxgiInfoQueue);
+        D3D_SAFE_RELEASE(dxgiInfoQueue);
 #endif /* __IDXGIInfoQueue_INTERFACE_DEFINED__ */
         creationFlags = DXGI_CREATE_FACTORY_DEBUG;
     }
@@ -885,7 +891,7 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
                       D3D_GUID(SDL_IID_IDXGIAdapter4),
                       (void **)&data->dxgiAdapter);
     if (FAILED(result)) {
-        WIN_SetErrorFromHRESULT(SDL_COMPOSE_ERROR("D3D12CreateDevice"), result);
+        WIN_SetErrorFromHRESULT(SDL_COMPOSE_ERROR("IDXGIFactory6::EnumAdapterByGpuPreference"), result);
         goto done;
     }
 
@@ -918,7 +924,7 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
         D3D_CALL(infoQueue, SetBreakOnSeverity, D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
         D3D_CALL(infoQueue, SetBreakOnSeverity, D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
 
-        SAFE_RELEASE(infoQueue);
+        D3D_SAFE_RELEASE(infoQueue);
     }
 #endif /*!defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)*/
 
@@ -982,7 +988,7 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
     data->srvDescriptorSize = D3D_CALL(d3dDevice, GetDescriptorHandleIncrementSize, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     SDL_zero(descriptorHeapDesc);
-    descriptorHeapDesc.NumDescriptors = 2;
+    descriptorHeapDesc.NumDescriptors = 4;
     descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
     descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     result = D3D_CALL(data->d3dDevice, CreateDescriptorHeap,
@@ -1059,32 +1065,23 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
         }
     }
 
-#if 0 /* Actually, don't do this, it causes a huge startup time on some systems */
     {
         const SDL_BlendMode defaultBlendModes[] = {
-            SDL_BLENDMODE_NONE,
             SDL_BLENDMODE_BLEND,
-            SDL_BLENDMODE_ADD,
-            SDL_BLENDMODE_MOD,
-            SDL_BLENDMODE_MUL
         };
         const DXGI_FORMAT defaultRTVFormats[] = {
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            DXGI_FORMAT_R10G10B10A2_UNORM,
             DXGI_FORMAT_B8G8R8A8_UNORM,
-            DXGI_FORMAT_B8G8R8X8_UNORM,
-            DXGI_FORMAT_R8_UNORM
         };
-        int i, j, k, l;
+        int j, k, l;
 
-        /* Create all the default pipeline state objects
-           (will add everything except custom blend states) */
+        /* Create a few default pipeline state objects, to verify that this renderer will work */
         for (i = 0; i < NUM_SHADERS; ++i) {
             for (j = 0; j < SDL_arraysize(defaultBlendModes); ++j) {
                 for (k = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT; k < D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH; ++k) {
                     for (l = 0; l < SDL_arraysize(defaultRTVFormats); ++l) {
                         if (!D3D12_CreatePipelineState(renderer, (D3D12_Shader)i, defaultBlendModes[j], (D3D12_PRIMITIVE_TOPOLOGY_TYPE)k, defaultRTVFormats[l])) {
                             /* D3D12_CreatePipelineState will set the SDL error, if it fails */
+                            result = E_FAIL;
                             goto done;
                         }
                     }
@@ -1092,7 +1089,6 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
             }
         }
     }
-#endif /* 0 */
 
     /* Create default vertex buffers  */
     for (i = 0; i < SDL_D3D12_NUM_VERTEX_BUFFERS; ++i) {
@@ -1100,22 +1096,32 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
     }
 
     /* Create samplers to use when drawing textures: */
+    static struct
+    {
+        D3D12_FILTER filter;
+        D3D12_TEXTURE_ADDRESS_MODE address;
+    } samplerParams[] = {
+        { D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP },
+        { D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP },
+        { D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP },
+        { D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_WRAP },
+    };
+    SDL_COMPILE_TIME_ASSERT(samplerParams_SIZE, SDL_arraysize(samplerParams) == SDL_D3D12_NUM_SAMPLERS);
     SDL_zero(samplerDesc);
-    samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
     samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
     samplerDesc.MipLODBias = 0.0f;
     samplerDesc.MaxAnisotropy = 1;
     samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
     samplerDesc.MinLOD = 0.0f;
     samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
-    D3D_CALL_RET(data->samplerDescriptorHeap, GetCPUDescriptorHandleForHeapStart, &data->nearestPixelSampler);
-    D3D_CALL(data->d3dDevice, CreateSampler, &samplerDesc, data->nearestPixelSampler);
-
-    samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    data->linearSampler.ptr = data->nearestPixelSampler.ptr + data->samplerDescriptorSize;
-    D3D_CALL(data->d3dDevice, CreateSampler, &samplerDesc, data->linearSampler);
+    D3D_CALL_RET(data->samplerDescriptorHeap, GetCPUDescriptorHandleForHeapStart, &data->samplers[0]);
+    for (i = 0; i < SDL_arraysize(samplerParams); ++i) {
+        samplerDesc.Filter = samplerParams[i].filter;
+        samplerDesc.AddressU = samplerParams[i].address;
+        samplerDesc.AddressV = samplerParams[i].address;
+        data->samplers[i].ptr = data->samplers[0].ptr + i * data->samplerDescriptorSize;
+        D3D_CALL(data->d3dDevice, CreateSampler, &samplerDesc, data->samplers[i]);
+    }
 
     /* Initialize the pool allocator for SRVs */
     for (i = 0; i < SDL_D3D12_MAX_NUM_TEXTURES; ++i) {
@@ -1127,15 +1133,15 @@ static HRESULT D3D12_CreateDeviceResources(SDL_Renderer *renderer)
     data->srvPoolHead = &data->srvPoolNodes[0];
 
     SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
-    SDL_SetProperty(props, SDL_PROP_RENDERER_D3D12_DEVICE_POINTER, data->d3dDevice);
-    SDL_SetProperty(props, SDL_PROP_RENDERER_D3D12_COMMAND_QUEUE_POINTER, data->commandQueue);
+    SDL_SetPointerProperty(props, SDL_PROP_RENDERER_D3D12_DEVICE_POINTER, data->d3dDevice);
+    SDL_SetPointerProperty(props, SDL_PROP_RENDERER_D3D12_COMMAND_QUEUE_POINTER, data->commandQueue);
 
 done:
-    SAFE_RELEASE(d3dDevice);
+    D3D_SAFE_RELEASE(d3dDevice);
     return result;
 }
 
-static DXGI_MODE_ROTATION D3D12_GetCurrentRotation()
+static DXGI_MODE_ROTATION D3D12_GetCurrentRotation(void)
 {
     /* FIXME */
     return DXGI_MODE_ROTATION_IDENTITY;
@@ -1154,7 +1160,7 @@ static BOOL D3D12_IsDisplayRotated90Degrees(DXGI_MODE_ROTATION rotation)
 
 static int D3D12_GetRotationForCurrentRenderTarget(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     if (data->textureRenderTarget) {
         return DXGI_MODE_ROTATION_IDENTITY;
     } else {
@@ -1164,7 +1170,7 @@ static int D3D12_GetRotationForCurrentRenderTarget(SDL_Renderer *renderer)
 
 static int D3D12_GetViewportAlignedD3DRect(SDL_Renderer *renderer, const SDL_Rect *sdlRect, D3D12_RECT *outRect, BOOL includeViewportOffset)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     const int rotation = D3D12_GetRotationForCurrentRenderTarget(renderer);
     const SDL_Rect *viewport = &data->currentViewport;
 
@@ -1208,7 +1214,7 @@ static int D3D12_GetViewportAlignedD3DRect(SDL_Renderer *renderer, const SDL_Rec
 #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
 static HRESULT D3D12_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     IDXGISwapChain1 *swapChain = NULL;
     HRESULT result = S_OK;
 
@@ -1218,7 +1224,7 @@ static HRESULT D3D12_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
     swapChainDesc.Width = w;
     swapChainDesc.Height = h;
     switch (renderer->output_colorspace) {
-    case SDL_COLORSPACE_SCRGB:
+    case SDL_COLORSPACE_SRGB_LINEAR:
         swapChainDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
         data->renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
         break;
@@ -1245,7 +1251,12 @@ static HRESULT D3D12_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
     swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | /* To support SetMaximumFrameLatency */
                           DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;                  /* To support presenting with allow tearing on */
 
-    HWND hwnd = (HWND)SDL_GetProperty(SDL_GetWindowProperties(renderer->window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+    HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(renderer->window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+    if (!hwnd) {
+        SDL_SetError("Couldn't get window handle");
+        result = E_FAIL;
+        goto done;
+    }
 
     result = D3D_CALL(data->dxgiFactory, CreateSwapChainForHwnd,
                       (IUnknown *)data->commandQueue,
@@ -1282,7 +1293,7 @@ static HRESULT D3D12_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
     UINT colorspace_support = 0;
     DXGI_COLOR_SPACE_TYPE colorspace;
     switch (renderer->output_colorspace) {
-    case SDL_COLORSPACE_SCRGB:
+    case SDL_COLORSPACE_SRGB_LINEAR:
         colorspace = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
         break;
     case SDL_COLORSPACE_HDR10:
@@ -1306,8 +1317,10 @@ static HRESULT D3D12_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
         result = DXGI_ERROR_UNSUPPORTED;
     }
 
+    SDL_SetPointerProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_D3D12_SWAPCHAIN_POINTER, data->swapChain);
+
 done:
-    SAFE_RELEASE(swapChain);
+    D3D_SAFE_RELEASE(swapChain);
     return result;
 }
 #endif
@@ -1347,7 +1360,7 @@ D3D12_HandleDeviceLost(SDL_Renderer *renderer)
 /* Initialize all resources that change when the window's size changes. */
 static HRESULT D3D12_CreateWindowSizeDependentResources(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     HRESULT result = S_OK;
     int i, w, h;
 
@@ -1360,7 +1373,7 @@ static HRESULT D3D12_CreateWindowSizeDependentResources(SDL_Renderer *renderer)
 
     /* Release render targets */
     for (i = 0; i < SDL_D3D12_NUM_BUFFERS; ++i) {
-        SAFE_RELEASE(data->renderTargets[i]);
+        D3D_SAFE_RELEASE(data->renderTargets[i]);
     }
 
     /* The width and height of the swap chain must be based on the display's
@@ -1473,7 +1486,7 @@ done:
 /* This method is called when the window's size changes. */
 static HRESULT D3D12_UpdateForWindowSizeChange(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     /* If the GPU has previous work, wait for it to be done first */
     D3D12_WaitForGPU(data);
     return D3D12_CreateWindowSizeDependentResources(renderer);
@@ -1481,7 +1494,7 @@ static HRESULT D3D12_UpdateForWindowSizeChange(SDL_Renderer *renderer)
 
 static void D3D12_WindowEvent(SDL_Renderer *renderer, const SDL_WindowEvent *event)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
 
     if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
         data->pixelSizeChanged = SDL_TRUE;
@@ -1508,7 +1521,7 @@ static SDL_bool D3D12_SupportsBlendMode(SDL_Renderer *renderer, SDL_BlendMode bl
 
 static SIZE_T D3D12_GetAvailableSRVIndex(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     if (rendererData->srvPoolHead) {
         SIZE_T index = rendererData->srvPoolHead->index;
         rendererData->srvPoolHead = (D3D12_SRVPoolNode *)(rendererData->srvPoolHead->next);
@@ -1521,14 +1534,14 @@ static SIZE_T D3D12_GetAvailableSRVIndex(SDL_Renderer *renderer)
 
 static void D3D12_FreeSRVIndex(SDL_Renderer *renderer, SIZE_T index)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     rendererData->srvPoolNodes[index].next = rendererData->srvPoolHead;
     rendererData->srvPoolHead = &rendererData->srvPoolNodes[index];
 }
 
 static int GetTextureProperty(SDL_PropertiesID props, const char *name, ID3D12Resource **texture)
 {
-    IUnknown *unknown = (IUnknown*)SDL_GetProperty(props, name, NULL);
+    IUnknown *unknown = (IUnknown*)SDL_GetPointerProperty(props, name, NULL);
     if (unknown) {
         HRESULT result = D3D_CALL(unknown, QueryInterface, D3D_GUID(SDL_IID_ID3D12Resource), (void **)texture);
         if (FAILED(result)) {
@@ -1540,7 +1553,7 @@ static int GetTextureProperty(SDL_PropertiesID props, const char *name, ID3D12Re
 
 static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL_PropertiesID create_props)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     D3D12_TextureData *textureData;
     HRESULT result;
     DXGI_FORMAT textureFormat = SDLPixelFormatToDXGITextureFormat(texture->format, renderer->output_colorspace);
@@ -1558,7 +1571,7 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
     }
     textureData->scaleMode = (texture->scaleMode == SDL_SCALEMODE_NEAREST) ? D3D12_FILTER_MIN_MAG_MIP_POINT : D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 
-    texture->driverdata = textureData;
+    texture->internal = textureData;
     textureData->mainTextureFormat = textureFormat;
 
     SDL_zero(textureDesc);
@@ -1575,14 +1588,17 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
     /* NV12 textures must have even width and height */
     if (texture->format == SDL_PIXELFORMAT_NV12 ||
         texture->format == SDL_PIXELFORMAT_NV21 ||
-        texture->format == SDL_PIXELFORMAT_P010 ||
-        texture->format == SDL_PIXELFORMAT_P016) {
+        texture->format == SDL_PIXELFORMAT_P010) {
         textureDesc.Width = (textureDesc.Width + 1) & ~1;
         textureDesc.Height = (textureDesc.Height + 1) & ~1;
     }
     textureData->w = (int)textureDesc.Width;
     textureData->h = (int)textureDesc.Height;
-    textureData->shader = SHADER_RGB;
+    if (SDL_COLORSPACETRANSFER(texture->colorspace) == SDL_TRANSFER_CHARACTERISTICS_SRGB) {
+        textureData->shader = SHADER_RGB;
+    } else {
+        textureData->shader = SHADER_ADVANCED;
+    }
 
     if (texture->access == SDL_TEXTUREACCESS_TARGET) {
         textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -1610,7 +1626,7 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
         }
     }
     textureData->mainResourceState = D3D12_RESOURCE_STATE_COPY_DEST;
-    SDL_SetProperty(SDL_GetTextureProperties(texture), SDL_PROP_TEXTURE_D3D12_TEXTURE_POINTER, textureData->mainTexture);
+    SDL_SetPointerProperty(SDL_GetTextureProperties(texture), SDL_PROP_TEXTURE_D3D12_TEXTURE_POINTER, textureData->mainTexture);
 #if SDL_HAVE_YUV
     if (texture->format == SDL_PIXELFORMAT_YV12 ||
         texture->format == SDL_PIXELFORMAT_IYUV) {
@@ -1636,7 +1652,7 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
             }
         }
         textureData->mainResourceStateU = D3D12_RESOURCE_STATE_COPY_DEST;
-        SDL_SetProperty(SDL_GetTextureProperties(texture), SDL_PROP_TEXTURE_D3D12_TEXTURE_U_POINTER, textureData->mainTextureU);
+        SDL_SetPointerProperty(SDL_GetTextureProperties(texture), SDL_PROP_TEXTURE_D3D12_TEXTURE_U_POINTER, textureData->mainTextureU);
 
         if (GetTextureProperty(create_props, "d3d12.texture_v", &textureData->mainTextureV) < 0) {
             return -1;
@@ -1655,56 +1671,31 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
             }
         }
         textureData->mainResourceStateV = D3D12_RESOURCE_STATE_COPY_DEST;
-        SDL_SetProperty(SDL_GetTextureProperties(texture), SDL_PROP_TEXTURE_D3D12_TEXTURE_V_POINTER, textureData->mainTextureV);
+        SDL_SetPointerProperty(SDL_GetTextureProperties(texture), SDL_PROP_TEXTURE_D3D12_TEXTURE_V_POINTER, textureData->mainTextureV);
 
-        textureData->shader = SHADER_YUV;
-        textureData->shader_params = SDL_GetYCbCRtoRGBConversionMatrix(texture->colorspace, texture->w, texture->h, 8);
-        if (!textureData->shader_params) {
+        textureData->YCbCr_matrix = SDL_GetYCbCRtoRGBConversionMatrix(texture->colorspace, texture->w, texture->h, 8);
+        if (!textureData->YCbCr_matrix) {
             return SDL_SetError("Unsupported YUV colorspace");
         }
     }
 
     if (texture->format == SDL_PIXELFORMAT_NV12 ||
         texture->format == SDL_PIXELFORMAT_NV21 ||
-        texture->format == SDL_PIXELFORMAT_P010 ||
-        texture->format == SDL_PIXELFORMAT_P016) {
+        texture->format == SDL_PIXELFORMAT_P010) {
         int bits_per_pixel;
 
         textureData->nv12 = SDL_TRUE;
 
         switch (texture->format) {
-        case SDL_PIXELFORMAT_NV12:
-            textureData->shader = SHADER_NV12;
-            break;
-        case SDL_PIXELFORMAT_NV21:
-            textureData->shader = SHADER_NV21;
-            break;
-        case SDL_PIXELFORMAT_P010:
-        case SDL_PIXELFORMAT_P016:
-            if(SDL_COLORSPACEPRIMARIES(texture->colorspace) == SDL_COLOR_PRIMARIES_BT2020 &&
-               SDL_COLORSPACETRANSFER(texture->colorspace) == SDL_TRANSFER_CHARACTERISTICS_PQ) {
-                textureData->shader = SHADER_HDR10;
-            } else {
-                return SDL_SetError("Unsupported YUV colorspace");
-            }
-            break;
-        default:
-            /* This should never happen because of the check above */
-            return SDL_SetError("Unsupported YUV colorspace");
-        }
-        switch (texture->format) {
         case SDL_PIXELFORMAT_P010:
             bits_per_pixel = 10;
-            break;
-        case SDL_PIXELFORMAT_P016:
-            bits_per_pixel = 16;
             break;
         default:
             bits_per_pixel = 8;
             break;
         }
-        textureData->shader_params = SDL_GetYCbCRtoRGBConversionMatrix(texture->colorspace, texture->w, texture->h, bits_per_pixel);
-        if (!textureData->shader_params) {
+        textureData->YCbCr_matrix = SDL_GetYCbCRtoRGBConversionMatrix(texture->colorspace, texture->w, texture->h, bits_per_pixel);
+        if (!textureData->YCbCr_matrix) {
             return SDL_SetError("Unsupported YUV colorspace");
         }
     }
@@ -1747,7 +1738,7 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
 
         if (texture->format == SDL_PIXELFORMAT_NV12 || texture->format == SDL_PIXELFORMAT_NV21) {
             nvResourceViewDesc.Format = DXGI_FORMAT_R8G8_UNORM;
-        } else if (texture->format == SDL_PIXELFORMAT_P010 || texture->format == SDL_PIXELFORMAT_P016) {
+        } else if (texture->format == SDL_PIXELFORMAT_P010) {
             nvResourceViewDesc.Format = DXGI_FORMAT_R16G16_UNORM;
         }
         nvResourceViewDesc.Texture2D.PlaneSlice = 1;
@@ -1784,8 +1775,8 @@ static int D3D12_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL
 static void D3D12_DestroyTexture(SDL_Renderer *renderer,
                                  SDL_Texture *texture)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
 
     if (!textureData) {
         return;
@@ -1795,12 +1786,12 @@ static void D3D12_DestroyTexture(SDL_Renderer *renderer,
        Unfortunately, this means that deleting a lot of textures mid-frame will have poor performance. */
     D3D12_IssueBatch(rendererData);
 
-    SAFE_RELEASE(textureData->mainTexture);
-    SAFE_RELEASE(textureData->stagingBuffer);
+    D3D_SAFE_RELEASE(textureData->mainTexture);
+    D3D_SAFE_RELEASE(textureData->stagingBuffer);
     D3D12_FreeSRVIndex(renderer, textureData->mainSRVIndex);
 #if SDL_HAVE_YUV
-    SAFE_RELEASE(textureData->mainTextureU);
-    SAFE_RELEASE(textureData->mainTextureV);
+    D3D_SAFE_RELEASE(textureData->mainTextureU);
+    D3D_SAFE_RELEASE(textureData->mainTextureV);
     if (textureData->yuv) {
         D3D12_FreeSRVIndex(renderer, textureData->mainSRVIndexU);
         D3D12_FreeSRVIndex(renderer, textureData->mainSRVIndexV);
@@ -1811,7 +1802,7 @@ static void D3D12_DestroyTexture(SDL_Renderer *renderer,
     SDL_free(textureData->pixels);
 #endif
     SDL_free(textureData);
-    texture->driverdata = NULL;
+    texture->internal = NULL;
 }
 
 static int D3D12_UpdateTextureInternal(D3D12_RenderData *rendererData, ID3D12Resource *texture, int plane, int x, int y, int w, int h, const void *pixels, int pitch, D3D12_RESOURCE_STATES *resourceState)
@@ -1837,8 +1828,7 @@ static int D3D12_UpdateTextureInternal(D3D12_RenderData *rendererData, ID3D12Res
     textureDesc.Width = w;
     textureDesc.Height = h;
     if (textureDesc.Format == DXGI_FORMAT_NV12 ||
-        textureDesc.Format == DXGI_FORMAT_P010 ||
-        textureDesc.Format == DXGI_FORMAT_P016) {
+        textureDesc.Format == DXGI_FORMAT_P010) {
         textureDesc.Width = (textureDesc.Width + 1) & ~1;
         textureDesc.Height = (textureDesc.Height + 1) & ~1;
     }
@@ -1892,7 +1882,7 @@ static int D3D12_UpdateTextureInternal(D3D12_RenderData *rendererData, ID3D12Res
                       NULL,
                       (void **)&textureMemory);
     if (FAILED(result)) {
-        SAFE_RELEASE(rendererData->uploadBuffers[rendererData->currentUploadBuffer]);
+        D3D_SAFE_RELEASE(rendererData->uploadBuffers[rendererData->currentUploadBuffer]);
         return WIN_SetErrorFromHRESULT(SDL_COMPOSE_ERROR("ID3D12Resource::Map [map staging texture]"), result);
     }
 
@@ -1957,8 +1947,8 @@ static int D3D12_UpdateTexture(SDL_Renderer *renderer, SDL_Texture *texture,
                                const SDL_Rect *rect, const void *srcPixels,
                                int srcPitch)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
 
     if (!textureData) {
         return SDL_SetError("Texture is not currently available");
@@ -1987,7 +1977,12 @@ static int D3D12_UpdateTexture(SDL_Renderer *renderer, SDL_Texture *texture,
         /* Skip to the correct offset into the next texture */
         srcPixels = (const void *)((const Uint8 *)srcPixels + rect->h * srcPitch);
 
-        if (D3D12_UpdateTextureInternal(rendererData, textureData->mainTexture, 1, rect->x, rect->y, (rect->w + 1) & ~1, (rect->h + 1) & ~1, srcPixels, (srcPitch + 1) & ~1, &textureData->mainResourceState) < 0) {
+        if (texture->format == SDL_PIXELFORMAT_P010) {
+            srcPitch = (srcPitch + 3) & ~3;
+        } else {
+            srcPitch = (srcPitch + 1) & ~1;
+        }
+        if (D3D12_UpdateTextureInternal(rendererData, textureData->mainTexture, 1, rect->x, rect->y, (rect->w + 1) & ~1, (rect->h + 1) & ~1, srcPixels, srcPitch, &textureData->mainResourceState) < 0) {
             return -1;
         }
     }
@@ -2002,8 +1997,8 @@ static int D3D12_UpdateTextureYUV(SDL_Renderer *renderer, SDL_Texture *texture,
                                   const Uint8 *Uplane, int Upitch,
                                   const Uint8 *Vplane, int Vpitch)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
 
     if (!textureData) {
         return SDL_SetError("Texture is not currently available");
@@ -2026,8 +2021,8 @@ static int D3D12_UpdateTextureNV(SDL_Renderer *renderer, SDL_Texture *texture,
                                  const Uint8 *Yplane, int Ypitch,
                                  const Uint8 *UVplane, int UVpitch)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
 
     if (!textureData) {
         return SDL_SetError("Texture is not currently available");
@@ -2047,8 +2042,8 @@ static int D3D12_UpdateTextureNV(SDL_Renderer *renderer, SDL_Texture *texture,
 static int D3D12_LockTexture(SDL_Renderer *renderer, SDL_Texture *texture,
                              const SDL_Rect *rect, void **pixels, int *pitch)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
     HRESULT result = S_OK;
 
     D3D12_RESOURCE_DESC textureDesc;
@@ -2136,7 +2131,7 @@ static int D3D12_LockTexture(SDL_Renderer *renderer, SDL_Texture *texture,
                       NULL,
                       (void **)&textureMemory);
     if (FAILED(result)) {
-        SAFE_RELEASE(rendererData->uploadBuffers[rendererData->currentUploadBuffer]);
+        D3D_SAFE_RELEASE(rendererData->uploadBuffers[rendererData->currentUploadBuffer]);
         return WIN_SetErrorFromHRESULT(SDL_COMPOSE_ERROR("ID3D12Resource::Map [map staging texture]"), result);
     }
 
@@ -2167,8 +2162,8 @@ static int D3D12_LockTexture(SDL_Renderer *renderer, SDL_Texture *texture,
 
 static void D3D12_UnlockTexture(SDL_Renderer *renderer, SDL_Texture *texture)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
 
     D3D12_RESOURCE_DESC textureDesc;
     D3D12_SUBRESOURCE_FOOTPRINT pitchedDesc;
@@ -2241,12 +2236,12 @@ static void D3D12_UnlockTexture(SDL_Renderer *renderer, SDL_Texture *texture)
 
     /* Execute the command list before releasing the staging buffer */
     D3D12_IssueBatch(rendererData);
-    SAFE_RELEASE(textureData->stagingBuffer);
+    D3D_SAFE_RELEASE(textureData->stagingBuffer);
 }
 
 static void D3D12_SetTextureScaleMode(SDL_Renderer *renderer, SDL_Texture *texture, SDL_ScaleMode scaleMode)
 {
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
 
     if (!textureData) {
         return;
@@ -2257,7 +2252,7 @@ static void D3D12_SetTextureScaleMode(SDL_Renderer *renderer, SDL_Texture *textu
 
 static int D3D12_SetRenderTarget(SDL_Renderer *renderer, SDL_Texture *texture)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     D3D12_TextureData *textureData = NULL;
 
     if (!texture) {
@@ -2272,7 +2267,7 @@ static int D3D12_SetRenderTarget(SDL_Renderer *renderer, SDL_Texture *texture)
         return 0;
     }
 
-    textureData = (D3D12_TextureData *)texture->driverdata;
+    textureData = (D3D12_TextureData *)texture->internal;
 
     if (!textureData->mainTextureRenderTargetView.ptr) {
         return SDL_SetError("specified texture is not a render target");
@@ -2331,7 +2326,7 @@ static int D3D12_QueueGeometry(SDL_Renderer *renderer, SDL_RenderCommand *cmd, S
     int count = indices ? num_indices : num_vertices;
     VertexPositionColor *verts = (VertexPositionColor *)SDL_AllocateRenderVertices(renderer, count * sizeof(VertexPositionColor), 0, &cmd->data.draw.first);
     SDL_bool convert_color = SDL_RenderingLinearSpace(renderer);
-    D3D12_TextureData *textureData = texture ? (D3D12_TextureData *)texture->driverdata : NULL;
+    D3D12_TextureData *textureData = texture ? (D3D12_TextureData *)texture->internal : NULL;
     float u_scale = textureData ? (float)texture->w / textureData->w : 0.0f;
     float v_scale = textureData ? (float)texture->h / textureData->h : 0.0f;
 
@@ -2381,7 +2376,7 @@ static int D3D12_QueueGeometry(SDL_Renderer *renderer, SDL_RenderCommand *cmd, S
 static int D3D12_UpdateVertexBuffer(SDL_Renderer *renderer,
                                     const void *vertexData, size_t dataSizeInBytes)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     HRESULT result = S_OK;
     const int vbidx = rendererData->currentVertexBuffer;
     UINT8 *vertexBufferData = NULL;
@@ -2430,7 +2425,7 @@ static int D3D12_UpdateVertexBuffer(SDL_Renderer *renderer,
 
 static int D3D12_UpdateViewport(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     const SDL_Rect *viewport = &data->currentViewport;
     Float4X4 projection;
     Float4X4 view;
@@ -2519,13 +2514,75 @@ static int D3D12_UpdateViewport(SDL_Renderer *renderer)
     return 0;
 }
 
-static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *cmd, D3D12_Shader shader, const float *shader_params,
+static void D3D12_SetupShaderConstants(SDL_Renderer *renderer, const SDL_RenderCommand *cmd, const SDL_Texture *texture, PixelShaderConstants *constants)
+{
+    float output_headroom;
+
+    SDL_zerop(constants);
+
+    constants->scRGB_output = (float)SDL_RenderingLinearSpace(renderer);
+    constants->color_scale = cmd->data.draw.color_scale;
+
+    if (texture) {
+        D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
+
+        switch (texture->format) {
+        case SDL_PIXELFORMAT_YV12:
+        case SDL_PIXELFORMAT_IYUV:
+            constants->texture_type = TEXTURETYPE_YUV;
+            constants->input_type = INPUTTYPE_SRGB;
+            break;
+        case SDL_PIXELFORMAT_NV12:
+            constants->texture_type = TEXTURETYPE_NV12;
+            constants->input_type = INPUTTYPE_SRGB;
+            break;
+        case SDL_PIXELFORMAT_NV21:
+            constants->texture_type = TEXTURETYPE_NV21;
+            constants->input_type = INPUTTYPE_SRGB;
+            break;
+        case SDL_PIXELFORMAT_P010:
+            constants->texture_type = TEXTURETYPE_NV12;
+            constants->input_type = INPUTTYPE_HDR10;
+            break;
+        default:
+            constants->texture_type = TEXTURETYPE_RGB;
+            if (texture->colorspace == SDL_COLORSPACE_SRGB_LINEAR) {
+                constants->input_type = INPUTTYPE_SCRGB;
+            } else if (texture->colorspace == SDL_COLORSPACE_HDR10) {
+                constants->input_type = INPUTTYPE_HDR10;
+            } else {
+                constants->input_type = INPUTTYPE_UNSPECIFIED;
+            }
+            break;
+        }
+
+        constants->sdr_white_point = texture->SDR_white_point;
+
+        if (renderer->target) {
+            output_headroom = renderer->target->HDR_headroom;
+        } else {
+            output_headroom = renderer->HDR_headroom;
+        }
+
+        if (texture->HDR_headroom > output_headroom) {
+            constants->tonemap_method = TONEMAP_CHROME;
+            constants->tonemap_factor1 = (output_headroom / (texture->HDR_headroom * texture->HDR_headroom));
+            constants->tonemap_factor2 = (1.0f / output_headroom);
+        }
+
+        if (textureData->YCbCr_matrix) {
+            SDL_memcpy(constants->YCbCr_matrix, textureData->YCbCr_matrix, sizeof(constants->YCbCr_matrix));
+        }
+    }
+}
+
+static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *cmd, D3D12_Shader shader, const PixelShaderConstants *shader_constants,
                               D3D12_PRIMITIVE_TOPOLOGY_TYPE topology,
                               const int numShaderResources, D3D12_CPU_DESCRIPTOR_HANDLE *shaderResources,
                               D3D12_CPU_DESCRIPTOR_HANDLE *sampler, const Float4X4 *matrix)
 
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     const Float4X4 *newmatrix = matrix ? matrix : &rendererData->identity;
     D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView = D3D12_GetCurrentRenderTargetView(renderer);
     const SDL_BlendMode blendMode = cmd->data.draw.blend;
@@ -2533,19 +2590,19 @@ static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *c
     int i;
     D3D12_CPU_DESCRIPTOR_HANDLE firstShaderResource;
     DXGI_FORMAT rtvFormat = rendererData->renderTargetFormat;
-    SDL_bool scRGB_output = SDL_RenderingLinearSpace(renderer);
-    float color_scale = cmd->data.draw.color_scale;
+    D3D12_PipelineState *currentPipelineState = rendererData->currentPipelineState;;
+    PixelShaderConstants solid_constants;
 
     if (rendererData->textureRenderTarget) {
         rtvFormat = rendererData->textureRenderTarget->mainTextureFormat;
     }
 
     /* See if we need to change the pipeline state */
-    if (!rendererData->currentPipelineState ||
-        rendererData->currentPipelineState->shader != shader ||
-        rendererData->currentPipelineState->blendMode != blendMode ||
-        rendererData->currentPipelineState->topology != topology ||
-        rendererData->currentPipelineState->rtvFormat != rtvFormat) {
+    if (!currentPipelineState ||
+        currentPipelineState->shader != shader ||
+        currentPipelineState->blendMode != blendMode ||
+        currentPipelineState->topology != topology ||
+        currentPipelineState->rtvFormat != rtvFormat) {
 
         /* Find the matching pipeline.
            NOTE: Although it may seem inefficient to linearly search through ~450 pipelines
@@ -2553,34 +2610,36 @@ static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *c
            It's unlikely that using a hash table would affect performance a measurable amount unless
            it's a degenerate case that's changing the pipeline state dozens of times per frame.
         */
-        rendererData->currentPipelineState = NULL;
+        currentPipelineState = NULL;
         for (i = 0; i < rendererData->pipelineStateCount; ++i) {
             D3D12_PipelineState *candidatePiplineState = &rendererData->pipelineStates[i];
             if (candidatePiplineState->shader == shader &&
                 candidatePiplineState->blendMode == blendMode &&
                 candidatePiplineState->topology == topology &&
                 candidatePiplineState->rtvFormat == rtvFormat) {
-                rendererData->currentPipelineState = candidatePiplineState;
+                currentPipelineState = candidatePiplineState;
                 break;
             }
         }
 
         /* If we didn't find a match, create a new one -- it must mean the blend mode is non-standard */
-        if (!rendererData->currentPipelineState) {
-            rendererData->currentPipelineState = D3D12_CreatePipelineState(renderer, shader, blendMode, topology, rtvFormat);
+        if (!currentPipelineState) {
+            currentPipelineState = D3D12_CreatePipelineState(renderer, shader, blendMode, topology, rtvFormat);
         }
 
-        if (!rendererData->currentPipelineState) {
-            return SDL_SetError("[direct3d12] Unable to create required pipeline state");
+        if (!currentPipelineState) {
+            /* The error has been set inside D3D12_CreatePipelineState() */
+            return -1;
         }
 
-        D3D_CALL(rendererData->commandList, SetPipelineState, rendererData->currentPipelineState->pipelineState);
+        D3D_CALL(rendererData->commandList, SetPipelineState, currentPipelineState->pipelineState);
         D3D_CALL(rendererData->commandList, SetGraphicsRootSignature,
-                 rendererData->rootSignatures[D3D12_GetRootSignatureType(rendererData->currentPipelineState->shader)]);
+                 rendererData->rootSignatures[D3D12_GetRootSignatureType(currentPipelineState->shader)]);
         /* When we change these we will need to re-upload the constant buffer and reset any descriptors */
         updateSubresource = SDL_TRUE;
         rendererData->currentSampler.ptr = 0;
         rendererData->currentShaderResource.ptr = 0;
+        rendererData->currentPipelineState = currentPipelineState;
     }
 
     if (renderTargetView.ptr != rendererData->currentRenderTargetView.ptr) {
@@ -2627,16 +2686,9 @@ static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *c
         case SHADER_RGB:
             tableIndex = 3;
             break;
-#if SDL_HAVE_YUV
-        case SHADER_YUV:
+        case SHADER_ADVANCED:
             tableIndex = 5;
             break;
-        case SHADER_NV12:
-        case SHADER_NV21:
-        case SHADER_HDR10:
-            tableIndex = 4;
-            break;
-#endif
         default:
             return SDL_SetError("[direct3d12] Trying to set a sampler for a shader which doesn't have one");
             break;
@@ -2655,28 +2707,20 @@ static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *c
                  0);
     }
 
+    if (!shader_constants) {
+        D3D12_SetupShaderConstants(renderer, cmd, NULL, &solid_constants);
+        shader_constants = &solid_constants;
+    }
+
     if (updateSubresource == SDL_TRUE ||
-        scRGB_output != rendererData->currentPipelineState->scRGB_output ||
-        color_scale != rendererData->currentPipelineState->color_scale ||
-        (shader_params && shader_params != rendererData->currentPipelineState->shader_params)) {
-        PixelShaderConstants constants;
-
-        constants.scRGB_output = (float)scRGB_output;
-        constants.color_scale = color_scale;
-
-        if (shader_params) {
-            SDL_memcpy(constants.YCbCr_matrix, shader_params, sizeof(constants.YCbCr_matrix));
-        }
-
+        SDL_memcmp(shader_constants, &currentPipelineState->shader_constants, sizeof(*shader_constants)) != 0) {
         D3D_CALL(rendererData->commandList, SetGraphicsRoot32BitConstants,
                  1,
-                 20,
-                 &constants,
+                 sizeof(*shader_constants) / sizeof(float),
+                 shader_constants,
                  0);
 
-        rendererData->currentPipelineState->scRGB_output = scRGB_output;
-        rendererData->currentPipelineState->color_scale = color_scale;
-        rendererData->currentPipelineState->shader_params = shader_params;
+        SDL_memcpy(&currentPipelineState->shader_constants, shader_constants, sizeof(*shader_constants));
     }
 
     return 0;
@@ -2685,16 +2729,37 @@ static int D3D12_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *c
 static int D3D12_SetCopyState(SDL_Renderer *renderer, const SDL_RenderCommand *cmd, const Float4X4 *matrix)
 {
     SDL_Texture *texture = cmd->data.draw.texture;
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
-    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
+    D3D12_TextureData *textureData = (D3D12_TextureData *)texture->internal;
     D3D12_CPU_DESCRIPTOR_HANDLE *textureSampler;
+    PixelShaderConstants constants;
+
+    D3D12_SetupShaderConstants(renderer, cmd, texture, &constants);
 
     switch (textureData->scaleMode) {
     case D3D12_FILTER_MIN_MAG_MIP_POINT:
-        textureSampler = &rendererData->nearestPixelSampler;
+        switch (cmd->data.draw.texture_address_mode) {
+        case SDL_TEXTURE_ADDRESS_CLAMP:
+            textureSampler = &rendererData->samplers[SDL_D3D12_SAMPLER_NEAREST_CLAMP];
+            break;
+        case SDL_TEXTURE_ADDRESS_WRAP:
+            textureSampler = &rendererData->samplers[SDL_D3D12_SAMPLER_NEAREST_WRAP];
+            break;
+        default:
+            return SDL_SetError("Unknown texture address mode: %d\n", cmd->data.draw.texture_address_mode);
+        }
         break;
     case D3D12_FILTER_MIN_MAG_MIP_LINEAR:
-        textureSampler = &rendererData->linearSampler;
+        switch (cmd->data.draw.texture_address_mode) {
+        case SDL_TEXTURE_ADDRESS_CLAMP:
+            textureSampler = &rendererData->samplers[SDL_D3D12_SAMPLER_LINEAR_CLAMP];
+            break;
+        case SDL_TEXTURE_ADDRESS_WRAP:
+            textureSampler = &rendererData->samplers[SDL_D3D12_SAMPLER_LINEAR_WRAP];
+            break;
+        default:
+            return SDL_SetError("Unknown texture address mode: %d\n", cmd->data.draw.texture_address_mode);
+        }
         break;
     default:
         return SDL_SetError("Unknown scale mode: %d\n", textureData->scaleMode);
@@ -2715,7 +2780,7 @@ static int D3D12_SetCopyState(SDL_Renderer *renderer, const SDL_RenderCommand *c
         D3D12_TransitionResource(rendererData, textureData->mainTextureV, textureData->mainResourceStateV, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         textureData->mainResourceStateV = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
-        return D3D12_SetDrawState(renderer, cmd, textureData->shader, textureData->shader_params, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, SDL_arraysize(shaderResources), shaderResources, textureSampler, matrix);
+        return D3D12_SetDrawState(renderer, cmd, textureData->shader, &constants, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, SDL_arraysize(shaderResources), shaderResources, textureSampler, matrix);
     } else if (textureData->nv12) {
         D3D12_CPU_DESCRIPTOR_HANDLE shaderResources[2];
 
@@ -2726,24 +2791,24 @@ static int D3D12_SetCopyState(SDL_Renderer *renderer, const SDL_RenderCommand *c
         D3D12_TransitionResource(rendererData, textureData->mainTexture, textureData->mainResourceState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         textureData->mainResourceState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
-        return D3D12_SetDrawState(renderer, cmd, textureData->shader, textureData->shader_params, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, SDL_arraysize(shaderResources), shaderResources, textureSampler, matrix);
+        return D3D12_SetDrawState(renderer, cmd, textureData->shader, &constants, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, SDL_arraysize(shaderResources), shaderResources, textureSampler, matrix);
     }
 #endif /* SDL_HAVE_YUV */
     D3D12_TransitionResource(rendererData, textureData->mainTexture, textureData->mainResourceState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     textureData->mainResourceState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-    return D3D12_SetDrawState(renderer, cmd, textureData->shader, textureData->shader_params, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, 1, &textureData->mainTextureResourceView, textureSampler, matrix);
+    return D3D12_SetDrawState(renderer, cmd, textureData->shader, &constants, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, 1, &textureData->mainTextureResourceView, textureSampler, matrix);
 }
 
 static void D3D12_DrawPrimitives(SDL_Renderer *renderer, D3D12_PRIMITIVE_TOPOLOGY primitiveTopology, const size_t vertexStart, const size_t vertexCount)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     D3D_CALL(rendererData->commandList, IASetPrimitiveTopology, primitiveTopology);
     D3D_CALL(rendererData->commandList, DrawInstanced, (UINT)vertexCount, 1, (UINT)vertexStart, 0);
 }
 
 static void D3D12_InvalidateCachedState(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     data->currentRenderTargetView.ptr = 0;
     data->currentShaderResource.ptr = 0;
     data->currentSampler.ptr = 0;
@@ -2753,7 +2818,7 @@ static void D3D12_InvalidateCachedState(SDL_Renderer *renderer)
 
 static int D3D12_RunCommandQueue(SDL_Renderer *renderer, SDL_RenderCommand *cmd, void *vertices, size_t vertsize)
 {
-    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *rendererData = (D3D12_RenderData *)renderer->internal;
     const int viewportRotation = D3D12_GetRotationForCurrentRenderTarget(renderer);
 
     if (rendererData->pixelSizeChanged) {
@@ -2777,17 +2842,13 @@ static int D3D12_RunCommandQueue(SDL_Renderer *renderer, SDL_RenderCommand *cmd,
             break; /* this isn't currently used in this render backend. */
         }
 
-        case SDL_RENDERCMD_SETCOLORSCALE:
-        {
-            break;
-        }
-
         case SDL_RENDERCMD_SETVIEWPORT:
         {
             SDL_Rect *viewport = &rendererData->currentViewport;
             if (SDL_memcmp(viewport, &cmd->data.viewport.rect, sizeof(cmd->data.viewport.rect)) != 0) {
                 SDL_copyp(viewport, &cmd->data.viewport.rect);
                 rendererData->viewportDirty = SDL_TRUE;
+                rendererData->cliprectDirty = SDL_TRUE;
             }
             break;
         }
@@ -2893,7 +2954,7 @@ static int D3D12_RunCommandQueue(SDL_Renderer *renderer, SDL_RenderCommand *cmd,
 
 static SDL_Surface *D3D12_RenderReadPixels(SDL_Renderer *renderer, const SDL_Rect *rect)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     ID3D12Resource *backBuffer = NULL;
     ID3D12Resource *readbackBuffer = NULL;
     HRESULT result;
@@ -2984,11 +3045,7 @@ static SDL_Surface *D3D12_RenderReadPixels(SDL_Renderer *renderer, const SDL_Rec
     pitchedDesc.Width = (UINT)textureDesc.Width;
     pitchedDesc.Height = textureDesc.Height;
     pitchedDesc.Depth = 1;
-    if (pitchedDesc.Format == DXGI_FORMAT_R8_UNORM) {
-        bpp = 1;
-    } else {
-        bpp = 4;
-    }
+    bpp = SDL_BYTESPERPIXEL(D3D12_DXGIFormatToSDLPixelFormat(pitchedDesc.Format));
     pitchedDesc.RowPitch = D3D12_Align(pitchedDesc.Width * bpp, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 
     SDL_zero(placedTextureDesc);
@@ -3038,17 +3095,13 @@ static SDL_Surface *D3D12_RenderReadPixels(SDL_Renderer *renderer, const SDL_Rec
     D3D_CALL(readbackBuffer, Unmap, 0, NULL);
 
 done:
-    SAFE_RELEASE(readbackBuffer);
+    D3D_SAFE_RELEASE(readbackBuffer);
     return output;
 }
 
 static int D3D12_RenderPresent(SDL_Renderer *renderer)
 {
-    D3D12_RenderData *data = (D3D12_RenderData *)renderer->driverdata;
-#if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
-    UINT syncInterval;
-    UINT presentFlags;
-#endif
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
     HRESULT result;
 
     /* Transition the render target to present state */
@@ -3064,18 +3117,10 @@ static int D3D12_RenderPresent(SDL_Renderer *renderer)
 #if defined(SDL_PLATFORM_XBOXONE) || defined(SDL_PLATFORM_XBOXSERIES)
     result = D3D12_XBOX_PresentFrame(data->commandQueue, data->frameToken, data->renderTargets[data->currentBackBufferIndex]);
 #else
-    if (renderer->info.flags & SDL_RENDERER_PRESENTVSYNC) {
-        syncInterval = 1;
-        presentFlags = 0;
-    } else {
-        syncInterval = 0;
-        presentFlags = DXGI_PRESENT_ALLOW_TEARING;
-    }
-
     /* The application may optionally specify "dirty" or "scroll"
      * rects to improve efficiency in certain scenarios.
      */
-    result = D3D_CALL(data->swapChain, Present, syncInterval, presentFlags);
+    result = D3D_CALL(data->swapChain, Present, data->syncInterval, data->presentFlags);
 #endif
 
     if (FAILED(result) && result != DXGI_ERROR_WAS_STILL_DRAWING) {
@@ -3126,45 +3171,47 @@ static int D3D12_RenderPresent(SDL_Renderer *renderer)
 
 static int D3D12_SetVSync(SDL_Renderer *renderer, const int vsync)
 {
-    if (vsync) {
-        renderer->info.flags |= SDL_RENDERER_PRESENTVSYNC;
+    D3D12_RenderData *data = (D3D12_RenderData *)renderer->internal;
+
+    if (vsync < 0) {
+        return SDL_Unsupported();
+    }
+
+    if (vsync > 0) {
+        data->syncInterval = vsync;
+        data->presentFlags = 0;
     } else {
-        renderer->info.flags &= ~SDL_RENDERER_PRESENTVSYNC;
+        data->syncInterval = 0;
+        data->presentFlags = DXGI_PRESENT_ALLOW_TEARING;
     }
     return 0;
 }
 
-SDL_Renderer *D3D12_CreateRenderer(SDL_Window *window, SDL_PropertiesID create_props)
+int D3D12_CreateRenderer(SDL_Renderer *renderer, SDL_Window *window, SDL_PropertiesID create_props)
 {
-    SDL_Renderer *renderer;
     D3D12_RenderData *data;
+
+    HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+    if (!hwnd) {
+        return SDL_SetError("Couldn't get window handle");
+    }
 
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) {
 		/* D3D12 removed the swap effect needed to support transparent windows, use D3D11 instead */
-		SDL_SetError("The direct3d12 renderer doesn't work with transparent windows");
-		return NULL;
+		return SDL_SetError("The direct3d12 renderer doesn't work with transparent windows");
 	}
-
-    renderer = (SDL_Renderer *)SDL_calloc(1, sizeof(*renderer));
-    if (!renderer) {
-        return NULL;
-    }
-    renderer->magic = &SDL_renderer_magic;
 
     SDL_SetupRendererColorspace(renderer, create_props);
 
     if (renderer->output_colorspace != SDL_COLORSPACE_SRGB &&
-        renderer->output_colorspace != SDL_COLORSPACE_SCRGB
+        renderer->output_colorspace != SDL_COLORSPACE_SRGB_LINEAR
         /*&& renderer->output_colorspace != SDL_COLORSPACE_HDR10*/) {
-        SDL_SetError("Unsupported output colorspace");
-        SDL_free(renderer);
-        return NULL;
+        return SDL_SetError("Unsupported output colorspace");
     }
 
     data = (D3D12_RenderData *)SDL_calloc(1, sizeof(*data));
     if (!data) {
-        SDL_free(renderer);
-        return NULL;
+        return -1;
     }
 
     data->identity = MatrixIdentity();
@@ -3183,7 +3230,6 @@ SDL_Renderer *D3D12_CreateRenderer(SDL_Window *window, SDL_PropertiesID create_p
     renderer->SetRenderTarget = D3D12_SetRenderTarget;
     renderer->QueueSetViewport = D3D12_QueueNoOp;
     renderer->QueueSetDrawColor = D3D12_QueueNoOp;
-    renderer->QueueSetColorScale = D3D12_QueueNoOp;
     renderer->QueueDrawPoints = D3D12_QueueDrawPoints;
     renderer->QueueDrawLines = D3D12_QueueDrawPoints; /* lines and points queue vertices the same way. */
     renderer->QueueGeometry = D3D12_QueueGeometry;
@@ -3193,15 +3239,24 @@ SDL_Renderer *D3D12_CreateRenderer(SDL_Window *window, SDL_PropertiesID create_p
     renderer->RenderPresent = D3D12_RenderPresent;
     renderer->DestroyTexture = D3D12_DestroyTexture;
     renderer->DestroyRenderer = D3D12_DestroyRenderer;
-    renderer->info = D3D12_RenderDriver.info;
-    renderer->info.flags = SDL_RENDERER_ACCELERATED;
-    renderer->driverdata = data;
+    renderer->SetVSync = D3D12_SetVSync;
+    renderer->internal = data;
     D3D12_InvalidateCachedState(renderer);
 
-    if (SDL_GetBooleanProperty(create_props, SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_BOOLEAN, SDL_FALSE)) {
-        renderer->info.flags |= SDL_RENDERER_PRESENTVSYNC;
-    }
-    renderer->SetVSync = D3D12_SetVSync;
+    renderer->name = D3D12_RenderDriver.name;
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_ARGB8888);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_XRGB8888);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_XBGR2101010);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_RGBA64_FLOAT);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_YV12);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_IYUV);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_NV12);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_NV21);
+    SDL_AddSupportedTextureFormat(renderer, SDL_PIXELFORMAT_P010);
+    SDL_SetNumberProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 16384);
+
+    data->syncInterval = 0;
+    data->presentFlags = DXGI_PRESENT_ALLOW_TEARING;
 
     /* HACK: make sure the SDL_Renderer references the SDL_Window data now, in
      * order to give init functions access to the underlying window handle:
@@ -3210,37 +3265,17 @@ SDL_Renderer *D3D12_CreateRenderer(SDL_Window *window, SDL_PropertiesID create_p
 
     /* Initialize Direct3D resources */
     if (FAILED(D3D12_CreateDeviceResources(renderer))) {
-        D3D12_DestroyRenderer(renderer);
-        return NULL;
+        return -1;
     }
     if (FAILED(D3D12_CreateWindowSizeDependentResources(renderer))) {
-        D3D12_DestroyRenderer(renderer);
-        return NULL;
+        return -1;
     }
 
-    return renderer;
+    return 0;
 }
 
 SDL_RenderDriver D3D12_RenderDriver = {
-    D3D12_CreateRenderer,
-    {
-        "direct3d12",
-        (SDL_RENDERER_ACCELERATED |
-         SDL_RENDERER_PRESENTVSYNC), /* flags.  see SDL_RendererFlags */
-        9,                           /* num_texture_formats */
-        {                            /* texture_formats */
-          SDL_PIXELFORMAT_ARGB8888,
-          SDL_PIXELFORMAT_XRGB8888,
-          SDL_PIXELFORMAT_RGBA64_FLOAT,
-          SDL_PIXELFORMAT_YV12,
-          SDL_PIXELFORMAT_IYUV,
-          SDL_PIXELFORMAT_NV12,
-          SDL_PIXELFORMAT_NV21,
-          SDL_PIXELFORMAT_P010,
-          SDL_PIXELFORMAT_P016 },
-        16384, /* max_texture_width */
-        16384  /* max_texture_height */
-    }
+    D3D12_CreateRenderer, "direct3d12"
 };
 
 /* Ends C function definitions when using C++ */

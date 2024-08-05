@@ -32,8 +32,6 @@
 
 typedef struct joystick_hwdata
 {
-    SDL_bool accelerometer;
-
     GCController __unsafe_unretained *controller;
     void *rumble;
     int pause_button_index;
@@ -42,7 +40,7 @@ typedef struct joystick_hwdata
     char *name;
     SDL_Joystick *joystick;
     SDL_JoystickID instance_id;
-    SDL_JoystickGUID guid;
+    SDL_GUID guid;
 
     int naxes;
     int nbuttons;

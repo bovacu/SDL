@@ -20,6 +20,8 @@
 */
 #include "../../SDL_internal.h"
 #include "../SDL_sysvideo.h"
+#include "../../events/SDL_keyboard_c.h"
+#include "../../events/SDL_mouse_c.h"
 #include "SDL_qnx.h"
 
 static screen_context_t context;
@@ -50,7 +52,10 @@ static int videoInit(SDL_VideoDevice *_this)
         return -1;
     }
 
-    _this->num_displays = 1;
+    /* Assume we have a mouse and keyboard */
+    SDL_AddKeyboard(SDL_DEFAULT_KEYBOARD_ID, NULL, SDL_FALSE);
+    SDL_AddMouse(SDL_DEFAULT_MOUSE_ID, NULL, SDL_FALSE);
+
     return 0;
 }
 
@@ -125,7 +130,7 @@ static int createWindow(SDL_VideoDevice *_this, SDL_Window *window)
         goto fail;
     }
 
-    window->driverdata = impl;
+    window->internal = impl;
     return 0;
 
 fail:
@@ -147,10 +152,10 @@ fail:
  * @param[out]  pitch   Holds the number of bytes per line
  * @return  0 if successful, -1 on error
  */
-static int createWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window * window, Uint32 * format,
+static int createWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window * window, SDL_PixelFormat * format,
                         void ** pixels, int *pitch)
 {
-    window_impl_t   *impl = (window_impl_t *)window->driverdata;
+    window_impl_t   *impl = (window_impl_t *)window->internal;
     screen_buffer_t buffer;
 
     // Get a pointer to the buffer's memory.
@@ -185,7 +190,7 @@ static int createWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window * window, 
 static int updateWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects,
                         int numrects)
 {
-    window_impl_t   *impl = (window_impl_t *)window->driverdata;
+    window_impl_t   *impl = (window_impl_t *)window->internal;
     screen_buffer_t buffer;
 
     if (screen_get_window_property_pv(impl->window, SCREEN_PROPERTY_BUFFERS,
@@ -238,7 +243,7 @@ static void pumpEvents(SDL_VideoDevice *_this)
  */
 static void setWindowSize(SDL_VideoDevice *_this, SDL_Window *window)
 {
-    window_impl_t   *impl = (window_impl_t *)window->driverdata;
+    window_impl_t   *impl = (window_impl_t *)window->internal;
     int             size[2];
 
     size[0] = window->floating.w;
@@ -255,7 +260,7 @@ static void setWindowSize(SDL_VideoDevice *_this, SDL_Window *window)
  */
 static void showWindow(SDL_VideoDevice *_this, SDL_Window *window)
 {
-    window_impl_t   *impl = (window_impl_t *)window->driverdata;
+    window_impl_t   *impl = (window_impl_t *)window->internal;
     const int       visible = 1;
 
     screen_set_window_property_iv(impl->window, SCREEN_PROPERTY_VISIBLE,
@@ -269,7 +274,7 @@ static void showWindow(SDL_VideoDevice *_this, SDL_Window *window)
  */
 static void hideWindow(SDL_VideoDevice *_this, SDL_Window *window)
 {
-    window_impl_t   *impl = (window_impl_t *)window->driverdata;
+    window_impl_t   *impl = (window_impl_t *)window->internal;
     const int       visible = 0;
 
     screen_set_window_property_iv(impl->window, SCREEN_PROPERTY_VISIBLE,
@@ -283,11 +288,11 @@ static void hideWindow(SDL_VideoDevice *_this, SDL_Window *window)
  */
 static void destroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
 {
-    window_impl_t   *impl = (window_impl_t *)window->driverdata;
+    window_impl_t   *impl = (window_impl_t *)window->internal;
 
     if (impl) {
         screen_destroy_window(impl->window);
-        window->driverdata = NULL;
+        window->internal = NULL;
     }
 }
 
@@ -304,7 +309,7 @@ static void deleteDevice(SDL_VideoDevice *device)
  * Creates the QNX video plugin used by SDL.
  * @return  Initialized device if successful, NULL otherwise
  */
-static SDL_VideoDevice *createDevice()
+static SDL_VideoDevice *createDevice(void)
 {
     SDL_VideoDevice *device;
 
@@ -313,7 +318,7 @@ static SDL_VideoDevice *createDevice()
         return NULL;
     }
 
-    device->driverdata = NULL;
+    device->internal = NULL;
     device->VideoInit = videoInit;
     device->VideoQuit = videoQuit;
     device->CreateSDLWindow = createWindow;

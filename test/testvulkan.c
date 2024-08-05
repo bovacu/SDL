@@ -228,6 +228,9 @@ static void createInstance(void)
     appInfo.apiVersion = VK_API_VERSION_1_0;
     instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instanceCreateInfo.pApplicationInfo = &appInfo;
+#ifdef __APPLE__
+    instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
     instanceCreateInfo.ppEnabledExtensionNames = SDL_Vulkan_GetInstanceExtensions(&instanceCreateInfo.enabledExtensionCount);
     result = vkCreateInstance(&instanceCreateInfo, NULL, &vulkanContext->instance);
@@ -259,10 +262,7 @@ static void loadInstanceFunctions(void)
 
 static void createSurface(void)
 {
-    if (!SDL_Vulkan_CreateSurface(vulkanContext->window,
-                                  vulkanContext->instance,
-                                  NULL,
-                                  &vulkanContext->surface)) {
+    if (SDL_Vulkan_CreateSurface(vulkanContext->window, vulkanContext->instance, NULL, &vulkanContext->surface) < 0) {
         vulkanContext->surface = VK_NULL_HANDLE;
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Vulkan_CreateSurface(): %s\n", SDL_GetError());
         quit(2);
@@ -310,6 +310,7 @@ static void findPhysicalDevice(void)
         uint32_t queueFamilyIndex;
         uint32_t deviceExtensionCount = 0;
         SDL_bool hasSwapchainExtension = SDL_FALSE;
+        SDL_bool supportsPresent;
         uint32_t i;
 
         VkPhysicalDevice physicalDevice = physicalDevices[physicalDeviceIndex];
@@ -357,6 +358,22 @@ static void findPhysicalDevice(void)
                 quit(2);
             }
             if (supported) {
+                /* This check isn't necessary if you are able to check a
+                 * VkSurfaceKHR like above, but just as a sanity check we do
+                 * this here as part of testing the API.
+                 * -flibit
+                 */
+                supportsPresent = SDL_Vulkan_GetPresentationSupport(vulkanContext->instance, physicalDevice, queueFamilyIndex);
+                if (!supportsPresent) {
+                    SDL_free(physicalDevices);
+                    SDL_free(queueFamiliesProperties);
+                    SDL_free(deviceExtensions);
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                 "SDL_Vulkan_GetPresentationSupport(): %s\n",
+                                 SDL_GetError());
+                    quit(2);
+                }
+
                 vulkanContext->presentQueueFamilyIndex = queueFamilyIndex;
                 if (queueFamiliesProperties[queueFamilyIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                     break; // use this queue because it can present and do graphics
@@ -426,25 +443,38 @@ static void findPhysicalDevice(void)
 
 static void createDevice(void)
 {
-    VkDeviceQueueCreateInfo deviceQueueCreateInfo[1] = { { 0 } };
+    VkDeviceQueueCreateInfo deviceQueueCreateInfo[2] = { { 0 }, { 0 } };
     static const float queuePriority[] = { 1.0f };
     VkDeviceCreateInfo deviceCreateInfo = { 0 };
     static const char *const deviceExtensionNames[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+#ifdef __APPLE__        
+        "VK_KHR_portability_subset"
+#endif        
     };
     VkResult result;
 
-    deviceQueueCreateInfo->sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    deviceQueueCreateInfo->queueFamilyIndex = vulkanContext->graphicsQueueFamilyIndex;
-    deviceQueueCreateInfo->queueCount = 1;
-    deviceQueueCreateInfo->pQueuePriorities = &queuePriority[0];
-
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceCreateInfo.queueCreateInfoCount = 1;
+    deviceCreateInfo.queueCreateInfoCount = 0;
     deviceCreateInfo.pQueueCreateInfos = deviceQueueCreateInfo;
     deviceCreateInfo.pEnabledFeatures = NULL;
     deviceCreateInfo.enabledExtensionCount = SDL_arraysize(deviceExtensionNames);
     deviceCreateInfo.ppEnabledExtensionNames = deviceExtensionNames;
+
+    deviceQueueCreateInfo[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    deviceQueueCreateInfo[0].queueFamilyIndex = vulkanContext->graphicsQueueFamilyIndex;
+    deviceQueueCreateInfo[0].queueCount = 1;
+    deviceQueueCreateInfo[0].pQueuePriorities = queuePriority;
+    ++deviceCreateInfo.queueCreateInfoCount;
+
+    if (vulkanContext->presentQueueFamilyIndex != vulkanContext->graphicsQueueFamilyIndex) {
+        deviceQueueCreateInfo[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        deviceQueueCreateInfo[1].queueFamilyIndex = vulkanContext->presentQueueFamilyIndex;
+        deviceQueueCreateInfo[1].queueCount = 1;
+        deviceQueueCreateInfo[1].pQueuePriorities = queuePriority;
+        ++deviceCreateInfo.queueCreateInfoCount;
+    }
+
     result = vkCreateDevice(vulkanContext->physicalDevice, &deviceCreateInfo, NULL, &vulkanContext->device);
     if (result != VK_SUCCESS) {
         vulkanContext->device = VK_NULL_HANDLE;
@@ -602,7 +632,7 @@ static SDL_bool createSwapchain(void)
     int w, h;
     VkSwapchainCreateInfoKHR createInfo = { 0 };
     VkResult result;
-    Uint32 flags;
+    SDL_WindowFlags flags;
 
     // pick an image count
     vulkanContext->swapchainDesiredImageCount = vulkanContext->surfaceCapabilities.minImageCount + 1;
@@ -1078,7 +1108,7 @@ int main(int argc, char **argv)
     }
 
     /* Enable standard application logging */
-    SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
+    SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     /* Set Vulkan parameters */
     state->window_flags |= SDL_WINDOW_VULKAN;
@@ -1091,7 +1121,7 @@ int main(int argc, char **argv)
 
     mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
     if (mode) {
-        SDL_Log("Screen BPP    : %" SDL_PRIu32 "\n", SDL_BITSPERPIXEL(mode->format));
+        SDL_Log("Screen BPP    : %d\n", SDL_BITSPERPIXEL(mode->format));
     }
     SDL_GetWindowSize(state->windows[0], &dw, &dh);
     SDL_Log("Window Size   : %d,%d\n", dw, dh);

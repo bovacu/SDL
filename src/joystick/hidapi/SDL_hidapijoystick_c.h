@@ -48,7 +48,15 @@
 #define SDL_JOYSTICK_CAP_TRIGGER_RUMBLE 0x00000020
 
 /* Whether HIDAPI is enabled by default */
+#if defined(SDL_PLATFORM_ANDROID) || \
+    defined(SDL_PLATFORM_IOS) || \
+    defined(SDL_PLATFORM_TVOS) || \
+    defined(SDL_PLATFORM_VISIONOS)
+/* On Android, HIDAPI prompts for permissions and acquires exclusive access to the device, and on Apple mobile platforms it doesn't do anything except for handling Bluetooth Steam Controllers, so we'll leave it off by default. */
+#define SDL_HIDAPI_DEFAULT SDL_FALSE
+#else
 #define SDL_HIDAPI_DEFAULT SDL_TRUE
+#endif
 
 /* The maximum size of a USB packet for HID devices */
 #define USB_PACKET_LENGTH 64
@@ -58,7 +66,6 @@ struct SDL_HIDAPI_DeviceDriver;
 
 typedef struct SDL_HIDAPI_Device
 {
-    const void *magic;
     char *name;
     char *manufacturer_string;
     char *product_string;
@@ -67,7 +74,7 @@ typedef struct SDL_HIDAPI_Device
     Uint16 product_id;
     Uint16 version;
     char *serial;
-    SDL_JoystickGUID guid;
+    SDL_GUID guid;
     int interface_number; /* Available on Windows and Linux */
     int interface_class;
     int interface_subclass;
@@ -131,6 +138,7 @@ extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverLuna;
 extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverNintendoClassic;
 extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverPS3;
 extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverPS3ThirdParty;
+extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverPS3SonySixaxis;
 extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverPS4;
 extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverPS5;
 extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverShield;
@@ -150,10 +158,10 @@ extern SDL_bool HIDAPI_IsDeviceTypePresent(SDL_GamepadType type);
 extern SDL_bool HIDAPI_IsDevicePresent(Uint16 vendor_id, Uint16 product_id, Uint16 version, const char *name);
 
 /* Return the type of a joystick if it's present and supported */
-extern SDL_JoystickType HIDAPI_GetJoystickTypeFromGUID(SDL_JoystickGUID guid);
+extern SDL_JoystickType HIDAPI_GetJoystickTypeFromGUID(SDL_GUID guid);
 
 /* Return the type of a game controller if it's present and supported */
-extern SDL_GamepadType HIDAPI_GetGamepadTypeFromGUID(SDL_JoystickGUID guid);
+extern SDL_GamepadType HIDAPI_GetGamepadTypeFromGUID(SDL_GUID guid);
 
 extern void HIDAPI_UpdateDevices(void);
 extern void HIDAPI_SetDeviceName(SDL_HIDAPI_Device *device, const char *name);

@@ -259,6 +259,12 @@ static void EMSCRIPTEN_JoystickDetect(void)
 {
 }
 
+static SDL_bool EMSCRIPTEN_JoystickIsDevicePresent(Uint16 vendor_id, Uint16 product_id, Uint16 version, const char *name)
+{
+    /* We don't override any other drivers */
+    return SDL_FALSE;
+}
+
 static const char *EMSCRIPTEN_JoystickGetDeviceName(int device_index)
 {
     return JoystickByDeviceIndex(device_index)->name;
@@ -305,7 +311,6 @@ static int EMSCRIPTEN_JoystickOpen(SDL_Joystick *joystick, int device_index)
         return SDL_SetError("Joystick already opened");
     }
 
-    joystick->instance_id = item->device_instance;
     joystick->hwdata = (struct joystick_hwdata *)item;
     item->joystick = joystick;
 
@@ -373,7 +378,7 @@ static void EMSCRIPTEN_JoystickClose(SDL_Joystick *joystick)
     }
 }
 
-static SDL_JoystickGUID EMSCRIPTEN_JoystickGetDeviceGUID(int device_index)
+static SDL_GUID EMSCRIPTEN_JoystickGetDeviceGUID(int device_index)
 {
     /* the GUID is just the name for now */
     const char *name = EMSCRIPTEN_JoystickGetDeviceName(device_index);
@@ -414,6 +419,7 @@ SDL_JoystickDriver SDL_EMSCRIPTEN_JoystickDriver = {
     EMSCRIPTEN_JoystickInit,
     EMSCRIPTEN_JoystickGetCount,
     EMSCRIPTEN_JoystickDetect,
+    EMSCRIPTEN_JoystickIsDevicePresent,
     EMSCRIPTEN_JoystickGetDeviceName,
     EMSCRIPTEN_JoystickGetDevicePath,
     EMSCRIPTEN_JoystickGetDeviceSteamVirtualGamepadSlot,

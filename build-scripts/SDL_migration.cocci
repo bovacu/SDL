@@ -1051,7 +1051,7 @@ typedef SDL_GameController, SDL_Gamepad;
 @@
 @@
 - SDL_GameControllerAddMappingsFromRW
-+ SDL_AddGamepadMappingsFromRW
++ SDL_AddGamepadMappingsFromIO
   (...)
 @@
 typedef SDL_GameControllerAxis, SDL_GamepadAxis;
@@ -1292,13 +1292,8 @@ typedef SDL_GameControllerButton, SDL_GamepadButton;
 + SDL_JOYSTICK_TYPE_GAMEPAD
 @@
 @@
-- SDL_JoystickAttachVirtual
-+ SDL_AttachVirtualJoystick
-  (...)
-@@
-@@
 - SDL_JoystickAttachVirtualEx
-+ SDL_AttachVirtualJoystickEx
++ SDL_AttachVirtualJoystick
   (...)
 @@
 @@
@@ -1358,12 +1353,7 @@ typedef SDL_GameControllerButton, SDL_GamepadButton;
 @@
 @@
 - SDL_JoystickGetGUIDFromString
-+ SDL_GetJoystickGUIDFromString
-  (...)
-@@
-@@
-- SDL_JoystickGetGUIDString
-+ SDL_GetJoystickGUIDString
++ SDL_StringToGUID
   (...)
 @@
 @@
@@ -1549,10 +1539,6 @@ typedef SDL_GameControllerButton, SDL_GamepadButton;
 + SDL_KMOD_RCTRL
 @@
 @@
-- KMOD_RESERVED
-+ SDL_KMOD_RESERVED
-@@
-@@
 - KMOD_RGUI
 + SDL_KMOD_RGUI
 @@
@@ -1575,17 +1561,12 @@ typedef SDL_GameControllerButton, SDL_GamepadButton;
 @@
 @@
 - SDL_AllocFormat
-+ SDL_CreatePixelFormat
++ SDL_GetPixelFormatDetails
   (...)
 @@
 @@
 - SDL_AllocPalette
 + SDL_CreatePalette
-  (...)
-@@
-@@
-- SDL_FreeFormat
-+ SDL_DestroyPixelFormat
   (...)
 @@
 @@
@@ -1595,12 +1576,12 @@ typedef SDL_GameControllerButton, SDL_GamepadButton;
 @@
 @@
 - SDL_MasksToPixelFormatEnum
-+ SDL_GetPixelFormatEnumForMasks
++ SDL_GetPixelFormatForMasks
   (...)
 @@
 @@
 - SDL_PixelFormatEnumToMasks
-+ SDL_GetMasksForPixelFormatEnum
++ SDL_GetMasksForPixelFormat
   (...)
 @@
 @@
@@ -1804,25 +1785,15 @@ expression e2;
 @@
 @@
 - RW_SEEK_CUR
-+ SDL_RW_SEEK_CUR
++ SDL_IO_SEEK_CUR
 @@
 @@
 - RW_SEEK_END
-+ SDL_RW_SEEK_END
++ SDL_IO_SEEK_END
 @@
 @@
 - RW_SEEK_SET
-+ SDL_RW_SEEK_SET
-@@
-@@
-- SDL_AllocRW
-+ SDL_CreateRW
-  (...)
-@@
-@@
-- SDL_FreeRW
-+ SDL_DestroyRW
-  (...)
++ SDL_IO_SEEK_SET
 @@
 @@
 - SDL_SensorClose
@@ -2153,6 +2124,10 @@ expression e;
 + SDL_EVENT_JOYSTICK_AXIS_MOTION
 @@
 @@
+- SDL_JOYBALLMOTION
++ SDL_EVENT_JOYSTICK_BALL_MOTION
+@@
+@@
 - SDL_JOYHATMOTION
 + SDL_EVENT_JOYSTICK_HAT_MOTION
 @@
@@ -2413,20 +2388,40 @@ SDL_Event e1;
 - e1.caxis
 + e1.gaxis
 @@
+SDL_Event *e1;
+@@
+- e1->caxis
++ e1->gaxis
+@@
 SDL_Event e1;
 @@
 - e1.cbutton
 + e1.gbutton
+@@
+SDL_Event *e1;
+@@
+- e1->cbutton
++ e1->gbutton
 @@
 SDL_Event e1;
 @@
 - e1.cdevice
 + e1.gdevice
 @@
+SDL_Event *e1;
+@@
+- e1->cdevice
++ e1->gdevice
+@@
 SDL_Event e1;
 @@
 - e1.ctouchpad
 + e1.gtouchpad
+@@
+SDL_Event *e1;
+@@
+- e1->ctouchpad
++ e1->gtouchpad
 @@
 SDL_Event e1;
 @@
@@ -2435,28 +2430,48 @@ SDL_Event e1;
 @@
 SDL_Event *e1;
 @@
-- e1->caxis
-+ e1->gaxis
-@@
-SDL_Event *e1;
-@@
-- e1->cbutton
-+ e1->gbutton
-@@
-SDL_Event *e1;
-@@
-- e1->cdevice
-+ e1->gdevice
-@@
-SDL_Event *e1;
-@@
-- e1->ctouchpad
-+ e1->gtouchpad
-@@
-SDL_Event *e1;
-@@
 - e1->csensor
 + e1->gsensor
+@@
+SDL_Event e1;
+@@
+- e1.wheel.mouseX
++ e1.wheel.mouse_x
+@@
+SDL_Event *e1;
+@@
+- e1->wheel.mouseX
++ e1->wheel.mouse_x
+@@
+SDL_Event e1;
+@@
+- e1.wheel.mouseY
++ e1.wheel.mouse_y
+@@
+SDL_Event *e1;
+@@
+- e1->wheel.mouseY
++ e1->wheel.mouse_y
+@@
+SDL_Event e1;
+@@
+- e1.tfinger.touchId
++ e1.tfinger.touchID
+@@
+SDL_Event *e1;
+@@
+- e1->tfinger.touchId
++ e1->tfinger.touchID
+@@
+SDL_Event e1;
+@@
+- e1.tfinger.fingerId
++ e1.tfinger.fingerID
+@@
+SDL_Event *e1;
+@@
+- e1->tfinger.fingerId
++ e1->tfinger.fingerID
 @@
 expression e1, e2, e3, e4;
 @@
@@ -2496,7 +2511,7 @@ typedef SDL_atomic_t, SDL_AtomicInt;
 @@
 @@
 - SDL_SemPost
-+ SDL_PostSemaphore
++ SDL_SignalSemaphore
   (...)
 @@
 @@
@@ -2610,11 +2625,6 @@ typedef SDL_cond, SDL_Condition;
 + SDL_WINDOW_HIGH_PIXEL_DENSITY
 @@
 @@
-- SDL_TLSCreate
-+ SDL_CreateTLS
-  (...)
-@@
-@@
 - SDL_TLSGet
 + SDL_GetTLS
   (...)
@@ -2639,12 +2649,28 @@ typedef SDL_cond, SDL_Condition;
 + SDL_WINDOW_UTILITY
 @@
 @@
-- SDL_PIXELFORMAT_RGB888
-+ SDL_PIXELFORMAT_XRGB8888
+- SDL_PIXELFORMAT_BGR444
++ SDL_PIXELFORMAT_XBGR4444
+@@
+@@
+- SDL_PIXELFORMAT_BGR555
++ SDL_PIXELFORMAT_XBGR1555
 @@
 @@
 - SDL_PIXELFORMAT_BGR888
 + SDL_PIXELFORMAT_XBGR8888
+@@
+@@
+- SDL_PIXELFORMAT_RGB444
++ SDL_PIXELFORMAT_XRGB4444
+@@
+@@
+- SDL_PIXELFORMAT_RGB555
++ SDL_PIXELFORMAT_XRGB1555
+@@
+@@
+- SDL_PIXELFORMAT_RGB888
++ SDL_PIXELFORMAT_XRGB8888
 @@
 @@
 - SDL_strtokr
@@ -2909,3 +2935,668 @@ expression e1, e2, e3, e4;
 - SDL_HasWindowSurface
 + SDL_WindowHasSurface
   (...)
+@@
+SDL_PixelFormat e1;
+@@
+- e1.BitsPerPixel
++ e1.bits_per_pixel
+@@
+SDL_PixelFormat *e1;
+@@
+- e1->BitsPerPixel
++ e1->bits_per_pixel
+@@
+SDL_PixelFormat e1;
+@@
+- e1.BytesPerPixel
++ e1.bytes_per_pixel
+@@
+SDL_PixelFormat *e1;
+@@
+- e1->BytesPerPixel
++ e1->bytes_per_pixel
+@@
+SDL_MessageBoxButtonData e1;
+@@
+- e1.buttonid
++ e1.buttonID
+@@
+SDL_MessageBoxButtonData *e1;
+@@
+- e1->buttonid
++ e1->buttonID
+@@
+SDL_GamepadBinding e1;
+@@
+- e1.inputType
++ e1.input_type
+@@
+SDL_GamepadBinding *e1;
+@@
+- e1->inputType
++ e1->input_type
+@@
+SDL_GamepadBinding e1;
+@@
+- e1.outputType
++ e1.output_type
+@@
+SDL_GamepadBinding *e1;
+@@
+- e1->outputType
++ e1->output_type
+@@
+@@
+- SDL_HINT_ALLOW_TOPMOST
++ SDL_HINT_WINDOW_ALLOW_TOPMOST
+@@
+@@
+- SDL_HINT_DIRECTINPUT_ENABLED
++ SDL_HINT_JOYSTICK_DIRECTINPUT
+@@
+@@
+- SDL_HINT_GDK_TEXTINPUT_DEFAULT
++ SDL_HINT_GDK_TEXTINPUT_DEFAULT_TEXT
+@@
+@@
+- SDL_HINT_JOYSTICK_GAMECUBE_RUMBLE_BRAKE
++ SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE_RUMBLE_BRAKE
+@@
+@@
+- SDL_HINT_LINUX_DIGITAL_HATS
++ SDL_HINT_JOYSTICK_LINUX_DIGITAL_HATS
+@@
+@@
+- SDL_HINT_LINUX_HAT_DEADZONES
++ SDL_HINT_JOYSTICK_LINUX_HAT_DEADZONES
+@@
+@@
+- SDL_HINT_LINUX_JOYSTICK_CLASSIC
++ SDL_HINT_JOYSTICK_LINUX_CLASSIC
+@@
+@@
+- SDL_HINT_LINUX_JOYSTICK_DEADZONES
++ SDL_HINT_JOYSTICK_LINUX_DEADZONES
+@@
+@@
+- SDL_HINT_PS2_DYNAMIC_VSYNC
++ SDL_HINT_RENDER_PS2_DYNAMIC_VSYNC
+@@
+@@
+- SDL_JoystickNumBalls
++ SDL_GetNumJoystickBalls
+  (...)
+@@
+@@
+- SDL_JoystickGetBall
++ SDL_GetJoystickBall
+  (...)
+@@
+@@
+- SDL_RWclose
++ SDL_CloseIO
+  (...)
+@@
+@@
+- SDL_RWread
++ SDL_ReadIO
+  (...)
+@@
+@@
+- SDL_RWwrite
++ SDL_WriteIO
+  (...)
+@@
+@@
+- SDL_RWtell
++ SDL_TellIO
+  (...)
+@@
+@@
+- SDL_RWsize
++ SDL_SizeIO
+  (...)
+@@
+@@
+- SDL_RWseek
++ SDL_SeekIO
+  (...)
+@@
+@@
+- SDL_LoadBMP_RW
++ SDL_LoadBMP_IO
+  (...)
+@@
+@@
+- SDL_LoadWAV_RW
++ SDL_LoadWAV_IO
+  (...)
+@@
+@@
+- SDL_SaveBMP_RW
++ SDL_SaveBMP_IO
+  (...)
+@@
+@@
+- SDL_RWFromFile
++ SDL_IOFromFile
+  (...)
+@@
+@@
+- SDL_RWFromMem
++ SDL_IOFromMem
+  (...)
+@@
+@@
+- SDL_RWFromConstMem
++ SDL_IOFromConstMem
+  (...)
+@@
+typedef SDL_RWops, SDL_IOStream;
+@@
+- SDL_RWops
++ SDL_IOStream
+@@
+@@
+- SDL_LogGetOutputFunction
++ SDL_GetLogOutputFunction
+  (...)
+@@
+@@
+- SDL_LogSetOutputFunction
++ SDL_SetLogOutputFunction
+  (...)
+@@
+typedef SDL_eventaction, SDL_EventAction;
+@@
+- SDL_eventaction
++ SDL_EventAction
+@@
+typedef SDL_RendererFlip, SDL_FlipMode;
+@@
+- SDL_RendererFlip
++ SDL_FlipMode
+@@
+typedef SDL_Colour, SDL_Color;
+@@
+- SDL_Colour
++ SDL_Color
+@@
+@@
+- SDL_WinRTGetFSPathUTF8
++ SDL_GetWinRTFSPath
+  (...)
+@@
+@@
+- SDL_iPhoneSetAnimationCallback
++ SDL_SetiOSAnimationCallback
+  (...)
+@@
+@@
+- SDL_iPhoneSetEventPump
++ SDL_SetiOSEventPump
+  (...)
+@@
+@@
+- SDL_COMPILEDVERSION
++ SDL_VERSION
+@@
+@@
+- SDL_PATCHLEVEL
++ SDL_MICRO_VERSION
+@@
+@@
+- SDL_TABLESIZE
++ SDL_arraysize
+@@
+@@
+- SDLK_QUOTE
++ SDLK_APOSTROPHE
+@@
+@@
+- SDLK_BACKQUOTE
++ SDLK_GRAVE
+@@
+@@
+- SDLK_QUOTEDBL
++ SDLK_DBLAPOSTROPHE
+@@
+@@
+- SDL_LogSetAllPriority
++ SDL_SetLogPriorities
+  (...)
+@@
+@@
+- SDL_LogSetPriority
++ SDL_SetLogPriority
+  (...)
+@@
+@@
+- SDL_LogGetPriority
++ SDL_GetLogPriority
+  (...)
+@@
+@@
+- SDL_LogResetPriorities
++ SDL_ResetLogPriorities
+  (...)
+@@
+@@
+- SDL_SIMDGetAlignment
++ SDL_GetSIMDAlignment
+  (...)
+@@
+@@
+- SDL_MixAudioFormat
++ SDL_MixAudio
+  (...)
+@@
+@@
+- SDL_BlitScaled
++ SDL_BlitSurfaceScaled
+  (...)
+@@
+@@
+- SDL_SYSTEM_CURSOR_ARROW
++ SDL_SYSTEM_CURSOR_DEFAULT
+@@
+@@
+- SDL_SYSTEM_CURSOR_IBEAM
++ SDL_SYSTEM_CURSOR_TEXT
+@@
+@@
+- SDL_SYSTEM_CURSOR_WAITARROW
++ SDL_SYSTEM_CURSOR_PROGRESS
+@@
+@@
+- SDL_SYSTEM_CURSOR_SIZENWSE
++ SDL_SYSTEM_CURSOR_NWSE_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_SIZENESW
++ SDL_SYSTEM_CURSOR_NESW_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_SIZEWE
++ SDL_SYSTEM_CURSOR_EW_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_SIZENS
++ SDL_SYSTEM_CURSOR_NS_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_SIZEALL
++ SDL_SYSTEM_CURSOR_MOVE
+@@
+@@
+- SDL_SYSTEM_CURSOR_NO
++ SDL_SYSTEM_CURSOR_NOT_ALLOWED
+@@
+@@
+- SDL_SYSTEM_CURSOR_HAND
++ SDL_SYSTEM_CURSOR_POINTER
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_TOPLEFT
++ SDL_SYSTEM_CURSOR_NW_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_TOP
++ SDL_SYSTEM_CURSOR_N_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_TOPRIGHT
++ SDL_SYSTEM_CURSOR_NE_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_RIGHT
++ SDL_SYSTEM_CURSOR_E_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_BOTTOMRIGHT
++ SDL_SYSTEM_CURSOR_SE_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_BOTTOM
++ SDL_SYSTEM_CURSOR_S_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_BOTTOMLEFT
++ SDL_SYSTEM_CURSOR_SW_RESIZE
+@@
+@@
+- SDL_SYSTEM_CURSOR_WINDOW_LEFT
++ SDL_SYSTEM_CURSOR_W_RESIZE
+@@
+@@
+- SDL_SwapLE16
++ SDL_Swap16LE
+  (...)
+@@
+@@
+- SDL_SwapLE32
++ SDL_Swap32LE
+  (...)
+@@
+@@
+- SDL_SwapBE16
++ SDL_Swap16BE
+  (...)
+@@
+@@
+- SDL_SwapBE32
++ SDL_Swap32BE
+  (...)
+@@
+@@
+- SDL_SwapLE64
++ SDL_Swap64LE
+  (...)
+@@
+@@
+- SDL_SwapBE64
++ SDL_Swap64BE
+  (...)
+@@
+@@
+- SDL_SCANCODE_AUDIOMUTE
++ SDL_SCANCODE_MUTE
+@@
+@@
+- SDLK_AUDIOMUTE
++ SDLK_MUTE
+@@
+@@
+- SDL_SCANCODE_EJECT
++ SDL_SCANCODE_MEDIA_EJECT
+@@
+@@
+- SDLK_EJECT
++ SDLK_MEDIA_EJECT
+@@
+@@
+- SDL_SCANCODE_AUDIONEXT
++ SDL_SCANCODE_MEDIA_NEXT_TRACK
+@@
+@@
+- SDLK_AUDIONEXT
++ SDLK_MEDIA_NEXT_TRACK
+@@
+@@
+- SDL_SCANCODE_AUDIOPREV
++ SDL_SCANCODE_MEDIA_PREVIOUS_TRACK
+@@
+@@
+- SDLK_AUDIOPREV
++ SDLK_MEDIA_PREVIOUS_TRACK
+@@
+@@
+- SDL_SCANCODE_AUDIOSTOP
++ SDL_SCANCODE_MEDIA_STOP
+@@
+@@
+- SDLK_AUDIOSTOP
++ SDLK_MEDIA_STOP
+@@
+@@
+- SDL_SCANCODE_AUDIOPLAY
++ SDL_SCANCODE_MEDIA_PLAY
+@@
+@@
+- SDLK_AUDIOPLAY
++ SDLK_MEDIA_PLAY
+@@
+@@
+- SDL_SCANCODE_AUDIOREWIND
++ SDL_SCANCODE_MEDIA_REWIND
+@@
+@@
+- SDLK_AUDIOREWIND
++ SDLK_MEDIA_REWIND
+@@
+@@
+- SDL_SCANCODE_AUDIOFASTFORWARD
++ SDL_SCANCODE_MEDIA_FAST_FORWARD
+@@
+@@
+- SDLK_AUDIOFASTFORWARD
++ SDLK_MEDIA_FAST_FORWARD
+@@
+@@
+- SDL_SCANCODE_MEDIASELECT
++ SDL_SCANCODE_MEDIA_SELECT
+@@
+@@
+- SDLK_MEDIASELECT
++ SDLK_MEDIA_SELECT
+@@
+@@
+- SDLK_a
++ SDLK_A
+@@
+@@
+- SDLK_b
++ SDLK_B
+@@
+@@
+- SDLK_c
++ SDLK_C
+@@
+@@
+- SDLK_d
++ SDLK_D
+@@
+@@
+- SDLK_e
++ SDLK_E
+@@
+@@
+- SDLK_f
++ SDLK_F
+@@
+@@
+- SDLK_g
++ SDLK_G
+@@
+@@
+- SDLK_h
++ SDLK_H
+@@
+@@
+- SDLK_i
++ SDLK_I
+@@
+@@
+- SDLK_j
++ SDLK_J
+@@
+@@
+- SDLK_k
++ SDLK_K
+@@
+@@
+- SDLK_l
++ SDLK_L
+@@
+@@
+- SDLK_m
++ SDLK_M
+@@
+@@
+- SDLK_n
++ SDLK_N
+@@
+@@
+- SDLK_o
++ SDLK_O
+@@
+@@
+- SDLK_p
++ SDLK_P
+@@
+@@
+- SDLK_q
++ SDLK_Q
+@@
+@@
+- SDLK_r
++ SDLK_R
+@@
+@@
+- SDLK_s
++ SDLK_S
+@@
+@@
+- SDLK_t
++ SDLK_T
+@@
+@@
+- SDLK_u
++ SDLK_U
+@@
+@@
+- SDLK_v
++ SDLK_V
+@@
+@@
+- SDLK_w
++ SDLK_W
+@@
+@@
+- SDLK_x
++ SDLK_X
+@@
+@@
+- SDLK_y
++ SDLK_Y
+@@
+@@
+- SDLK_z
++ SDLK_Z
+@@
+@@
+- SDL_ConvertSurfaceFormat
++ SDL_ConvertSurface
+  (...)
+@@
+@@
+- SDL_PREALLOC
++ SDL_SURFACE_PREALLOCATED
+@@
+@@
+- SDL_SIMD_ALIGNED
++ SDL_SURFACE_SIMD_ALIGNED
+@@
+@@
+- SDL_GL_DeleteContext
++ SDL_GL_DestroyContext
+  (...)
+@@
+@@
+- SDL_AndroidGetActivity
++ SDL_GetAndroidActivity
+  (...)
+@@
+@@
+- SDL_AndroidGetExternalStoragePath
++ SDL_GetAndroidExternalStoragePath
+  (...)
+@@
+@@
+- SDL_AndroidGetExternalStorageState
++ SDL_GetAndroidExternalStorageState
+  (...)
+@@
+@@
+- SDL_AndroidGetInternalStoragePath
++ SDL_GetAndroidInternalStoragePath
+  (...)
+@@
+@@
+- SDL_AndroidGetJNIEnv
++ SDL_GetAndroidJNIEnv
+  (...)
+@@
+@@
+- SDL_Direct3D9GetAdapterIndex
++ SDL_GetDirect3D9AdapterIndex
+  (...)
+@@
+@@
+- SDL_GDKGetDefaultUser
++ SDL_GetGDKDefaultUser
+  (...)
+@@
+@@
+- SDL_GDKGetTaskQueue
++ SDL_GetGDKTaskQueue
+  (...)
+@@
+@@
+- SDL_WinRTGetDeviceFamily
++ SDL_GetWinRTDeviceFamily
+  (...)
+@@
+@@
+- SDL_LinuxSetThreadPriority
++ SDL_SetLinuxThreadPriority
+  (...)
+@@
+@@
+- SDL_LinuxSetThreadPriorityAndPolicy
++ SDL_SetLinuxThreadPriorityAndPolicy
+  (...)
+@@
+@@
+- SDL_DXGIGetOutputInfo
++ SDL_GetDXGIOutputInfo
+  (...)
+@@
+@@
+- SDL_AndroidBackButton
++ SDL_TriggerAndroidBackButton
+  (...)
+@@
+@@
+- SDL_AndroidRequestPermission
++ SDL_RequestAndroidPermission
+  (...)
+@@
+@@
+- SDL_AndroidRequestPermissionCallback
++ SDL_RequestAndroidPermissionCallback
+  (...)
+@@
+@@
+- SDL_AndroidShowToast
++ SDL_ShowAndroidToast
+  (...)
+@@
+@@
+- SDL_AndroidSendMessage
++ SDL_SendAndroidMessage
+  (...)
+@@
+typedef SDL_JoystickGUID, SDL_GUID;
+@@
+- SDL_JoystickGUID
++ SDL_GUID
+@@
+@@
+- SDL_GUIDFromString
++ SDL_StringToGUID
+  (...)
+@@
+@@
+- SDL_OnApplicationWillResignActive
++ SDL_OnApplicationWillEnterBackground
+  (...)
+@@
+@@
+- SDL_OnApplicationDidBecomeActive
++ SDL_OnApplicationDidEnterForeground
+  (...)
+@@
+@@
+- SDL_HINT_VIDEO_WAYLAND_EMULATE_MOUSE_WARP
++ SDL_HINT_MOUSE_EMULATE_WARP_WITH_RELATIVE

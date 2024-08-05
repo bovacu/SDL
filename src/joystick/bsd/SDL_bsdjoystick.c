@@ -173,7 +173,7 @@ typedef struct SDL_joylist_item
     SDL_JoystickID device_instance;
     char *path; /* "/dev/uhid0" or whatever */
     char *name; /* "SideWinder 3D Pro" or whatever */
-    SDL_JoystickGUID guid;
+    SDL_GUID guid;
     dev_t devnum;
     struct SDL_joylist_item *next;
 } SDL_joylist_item;
@@ -393,7 +393,7 @@ static int MaybeAddDevice(const char *path)
 {
     struct stat sb;
     char *name = NULL;
-    SDL_JoystickGUID guid;
+    SDL_GUID guid;
     SDL_joylist_item *item;
     struct joystick_hwdata *hw;
 
@@ -427,15 +427,8 @@ static int MaybeAddDevice(const char *path)
             name = SDL_CreateJoystickName(di.udi_vendorNo, di.udi_productNo, di.udi_vendor, di.udi_product);
             guid = SDL_CreateJoystickGUID(SDL_HARDWARE_BUS_USB, di.udi_vendorNo, di.udi_productNo, di.udi_releaseNo, di.udi_vendor, di.udi_product, 0, 0);
 
-#ifdef SDL_JOYSTICK_HIDAPI
-            if (HIDAPI_IsDevicePresent(di.udi_vendorNo, di.udi_productNo, di.udi_releaseNo, name)) {
-                /* The HIDAPI driver is taking care of this device */
-                SDL_free(name);
-                FreeHwData(hw);
-                return -1;
-            }
-#endif
-            if (SDL_ShouldIgnoreJoystick(name, guid)) {
+            if (SDL_ShouldIgnoreJoystick(name, guid) ||
+                SDL_JoystickHandledByAnotherDriver(&SDL_BSD_JoystickDriver, di.udi_vendorNo, di.udi_productNo, di.udi_releaseNo, name)) {
                 SDL_free(name);
                 FreeHwData(hw);
                 return -1;
@@ -516,6 +509,12 @@ static void BSD_JoystickDetect(void)
 {
 }
 
+static SDL_bool BSD_JoystickIsDevicePresent(Uint16 vendor_id, Uint16 product_id, Uint16 version, const char *name)
+{
+    /* We don't override any other drivers */
+    return SDL_FALSE;
+}
+
 static SDL_joylist_item *GetJoystickByDevIndex(int device_index)
 {
     SDL_joylist_item *item = SDL_joylist;
@@ -557,7 +556,7 @@ static void BSD_JoystickSetDevicePlayerIndex(int device_index, int player_index)
 {
 }
 
-static SDL_JoystickGUID BSD_JoystickGetDeviceGUID(int device_index)
+static SDL_GUID BSD_JoystickGetDeviceGUID(int device_index)
 {
     return GetJoystickByDevIndex(device_index)->guid;
 }
@@ -596,7 +595,6 @@ static int BSD_JoystickOpen(SDL_Joystick *joy, int device_index)
         return -1;
     }
 
-    joy->instance_id = item->device_instance;
     joy->hwdata = hw;
     joy->naxes = hw->naxes;
     joy->nbuttons = hw->nbuttons;
@@ -848,6 +846,7 @@ SDL_JoystickDriver SDL_BSD_JoystickDriver = {
     BSD_JoystickInit,
     BSD_JoystickGetCount,
     BSD_JoystickDetect,
+    BSD_JoystickIsDevicePresent,
     BSD_JoystickGetDeviceName,
     BSD_JoystickGetDevicePath,
     BSD_JoystickGetDeviceSteamVirtualGamepadSlot,

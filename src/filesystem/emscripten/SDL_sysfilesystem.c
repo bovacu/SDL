@@ -24,18 +24,20 @@
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /* System dependent filesystem routines                                */
+
+#include "../SDL_sysfilesystem.h"
+
 #include <errno.h>
 #include <sys/stat.h>
 
 #include <emscripten/emscripten.h>
 
-char *SDL_GetBasePath(void)
+char *SDL_SYS_GetBasePath(void)
 {
-    char *retval = "/";
-    return SDL_strdup(retval);
+    return SDL_strdup("/");
 }
 
-char *SDL_GetPrefPath(const char *org, const char *app)
+char *SDL_SYS_GetPrefPath(const char *org, const char *app)
 {
     const char *append = "/libsdl/";
     char *retval;
@@ -82,7 +84,7 @@ char *SDL_GetPrefPath(const char *org, const char *app)
     return retval;
 }
 
-char *SDL_GetUserFolder(SDL_Folder folder)
+char *SDL_SYS_GetUserFolder(SDL_Folder folder)
 {
     const char *home = NULL;
 
@@ -97,7 +99,18 @@ char *SDL_GetUserFolder(SDL_Folder folder)
         return NULL;
     }
 
-    return SDL_strdup(home);
+    char *retval = SDL_malloc(SDL_strlen(home) + 2);
+    if (!retval) {
+        return NULL;
+    }
+
+    if (SDL_snprintf(retval, SDL_strlen(home) + 2, "%s/", home) < 0) {
+        SDL_SetError("Couldn't snprintf home path for Emscripten: %s", home);
+        SDL_free(retval);
+        return NULL;
+    }
+
+    return retval;
 }
 
 #endif /* SDL_FILESYSTEM_EMSCRIPTEN */

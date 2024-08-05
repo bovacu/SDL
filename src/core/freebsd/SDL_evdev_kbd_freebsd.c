@@ -133,7 +133,7 @@ static void kbd_cleanup_signal_action(int signum, siginfo_t *info, void *ucontex
     SDL_EVDEV_kbd_reraise_signal(signum);
 }
 
-static void kbd_unregister_emerg_cleanup()
+static void kbd_unregister_emerg_cleanup(void)
 {
     int tabidx;
 
@@ -264,8 +264,8 @@ SDL_EVDEV_keyboard_state *SDL_EVDEV_kbd_init(void)
             SDL_free(kbd->key_map);
             kbd->key_map = &keymap_default_us_acc;
         }
-        /* Allow inhibiting keyboard mute with env. variable for debugging etc. */
-        if (SDL_getenv("SDL_INPUT_FREEBSD_KEEP_KBD") == NULL) {
+
+        if (SDL_GetHintBoolean(SDL_HINT_MUTE_CONSOLE_KEYBOARD, SDL_TRUE)) {
             /* Take keyboard from console and open the actual keyboard device.
              * Ensures that the keystrokes do not leak through to the console.
              */
@@ -542,6 +542,7 @@ void SDL_EVDEV_kbd_keycode(SDL_EVDEV_keyboard_state *kbd, unsigned int keycode, 
                 if (down == 0) {
                     chg_vc_kbd_led(kbd, ALKED);
                 }
+                SDL_FALLTHROUGH;
             case LSH: /* left shift */
             case RSH: /* right shift */
                 k_shift(kbd, 0, down == 0);
@@ -551,6 +552,7 @@ void SDL_EVDEV_kbd_keycode(SDL_EVDEV_keyboard_state *kbd, unsigned int keycode, 
                 if (down == 0) {
                     chg_vc_kbd_led(kbd, ALKED);
                 }
+                SDL_FALLTHROUGH;
             case LCTR: /* left ctrl */
             case RCTR: /* right ctrl */
                 k_shift(kbd, 1, down == 0);
@@ -560,6 +562,7 @@ void SDL_EVDEV_kbd_keycode(SDL_EVDEV_keyboard_state *kbd, unsigned int keycode, 
                 if (down == 0) {
                     chg_vc_kbd_led(kbd, ALKED);
                 }
+                SDL_FALLTHROUGH;
             case LALT: /* left alt */
             case RALT: /* right alt */
                 k_shift(kbd, 2, down == 0);
