@@ -24,7 +24,7 @@ static SDLTest_CommonState *state;
 static int i, done;
 static SDL_FRect rect;
 static SDL_Event event;
-static SDL_bool warp;
+static bool warp;
 
 static void DrawRects(SDL_Renderer *renderer)
 {
@@ -32,14 +32,10 @@ static void DrawRects(SDL_Renderer *renderer)
     SDL_RenderFillRect(renderer, &rect);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    if (SDL_GetRelativeMouseMode()) {
-        SDLTest_DrawString(renderer, 0.f, 0.f, "Relative Mode: Enabled");
-    } else {
-        SDLTest_DrawString(renderer, 0.f, 0.f, "Relative Mode: Disabled");
-    }
+    SDLTest_DrawString(renderer, 0.f, 0.f, "Relative Mode: Enabled");
 }
 
-static void CenterMouse()
+static void CenterMouse(void)
 {
     /* Warp the mouse back to the center of the window with input focus to use the
      * center point for calculating future motion deltas.
@@ -142,9 +138,6 @@ static void loop(void)
 
 int main(int argc, char *argv[])
 {
-    /* Enable standard application logging */
-    SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
-
     /* Initialize test framework */
     state = SDLTest_CommonCreateState(argv, SDL_INIT_VIDEO);
     if (!state) {
@@ -159,7 +152,7 @@ int main(int argc, char *argv[])
         if (consumed == 0) {
             consumed = -1;
             if (SDL_strcasecmp(argv[i], "--warp") == 0) {
-                warp = SDL_TRUE;
+                warp = true;
                 consumed = 1;
             }
         }
@@ -196,8 +189,10 @@ int main(int argc, char *argv[])
      */
     if (warp) {
         SDL_HideCursor();
-    } else if (SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
-        return 3; /* Relative mode failed, just exit. */
+    } else {
+        for (i = 0; i < state->num_windows; ++i) {
+            SDL_SetWindowRelativeMouseMode(state->windows[i], true);
+        }
     }
 
     rect.x = DEFAULT_WINDOW_WIDTH / 2;

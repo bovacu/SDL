@@ -28,6 +28,7 @@
 #ifndef SDL_dialog_h_
 #define SDL_dialog_h_
 
+#include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_video.h>
 
@@ -48,7 +49,7 @@ extern "C" {
  * hyphens, underscores and periods. Alternatively, the whole string can be a
  * single asterisk ("*"), which serves as an "All files" filter.
  *
- * \since This struct is available since SDL 3.0.0.
+ * \since This struct is available since SDL 3.1.3.
  *
  * \sa SDL_DialogFileCallback
  * \sa SDL_ShowOpenFileDialog
@@ -86,7 +87,7 @@ typedef struct SDL_DialogFileFilter
  * \param filelist the file(s) chosen by the user.
  * \param filter index of the selected filter.
  *
- * \since This datatype is available since SDL 3.0.0.
+ * \since This datatype is available since SDL 3.1.3.
  *
  * \sa SDL_DialogFileFilter
  * \sa SDL_ShowOpenFileDialog
@@ -132,25 +133,25 @@ typedef void (SDLCALL *SDL_DialogFileCallback)(void *userdata, const char * cons
  *                 the selected filter.
  * \param userdata an optional pointer to pass extra data to the callback when
  *                 it will be invoked.
- * \param window the window that the dialog should be modal for. May be NULL.
+ * \param window the window that the dialog should be modal for, may be NULL.
  *               Not all platforms support this option.
- * \param filters a list of SDL_DialogFileFilter's. May be NULL. Not all
+ * \param filters a list of SDL_DialogFileFilter's, may be NULL. Not all
  *                platforms support this option, and platforms that do support
  *                it may allow the user to ignore the filters.
  * \param nfilters the number of filters. Ignored if filters is NULL.
- * \param default_location the default folder or file to start the dialog at.
- *                         May be NULL. Not all platforms support this option.
+ * \param default_location the default folder or file to start the dialog at,
+ *                         may be NULL. Not all platforms support this option.
  * \param allow_many if non-zero, the user will be allowed to select multiple
  *                   entries. Not all platforms support this option.
  *
- * \since This function is available since SDL 3.0.0.
+ * \since This function is available since SDL 3.1.3.
  *
  * \sa SDL_DialogFileCallback
  * \sa SDL_DialogFileFilter
  * \sa SDL_ShowSaveFileDialog
  * \sa SDL_ShowOpenFolderDialog
  */
-extern SDL_DECLSPEC void SDLCALL SDL_ShowOpenFileDialog(SDL_DialogFileCallback callback, void *userdata, SDL_Window *window, const SDL_DialogFileFilter *filters, int nfilters, const char *default_location, SDL_bool allow_many);
+extern SDL_DECLSPEC void SDLCALL SDL_ShowOpenFileDialog(SDL_DialogFileCallback callback, void *userdata, SDL_Window *window, const SDL_DialogFileFilter *filters, int nfilters, const char *default_location, bool allow_many);
 
 /**
  * Displays a dialog that lets the user choose a new or existing file on their
@@ -189,16 +190,16 @@ extern SDL_DECLSPEC void SDLCALL SDL_ShowOpenFileDialog(SDL_DialogFileCallback c
  *                 the selected filter.
  * \param userdata an optional pointer to pass extra data to the callback when
  *                 it will be invoked.
- * \param window the window that the dialog should be modal for. May be NULL.
+ * \param window the window that the dialog should be modal for, may be NULL.
  *               Not all platforms support this option.
- * \param filters a list of SDL_DialogFileFilter's. May be NULL. Not all
+ * \param filters a list of SDL_DialogFileFilter's, may be NULL. Not all
  *                platforms support this option, and platforms that do support
  *                it may allow the user to ignore the filters.
  * \param nfilters the number of filters. Ignored if filters is NULL.
- * \param default_location the default folder or file to start the dialog at.
- *                         May be NULL. Not all platforms support this option.
+ * \param default_location the default folder or file to start the dialog at,
+ *                         may be NULL. Not all platforms support this option.
  *
- * \since This function is available since SDL 3.0.0.
+ * \since This function is available since SDL 3.1.3.
  *
  * \sa SDL_DialogFileCallback
  * \sa SDL_DialogFileFilter
@@ -240,20 +241,20 @@ extern SDL_DECLSPEC void SDLCALL SDL_ShowSaveFileDialog(SDL_DialogFileCallback c
  *                 argument is always -1 for SDL_ShowOpenFolderDialog.
  * \param userdata an optional pointer to pass extra data to the callback when
  *                 it will be invoked.
- * \param window the window that the dialog should be modal for. May be NULL.
+ * \param window the window that the dialog should be modal for, may be NULL.
  *               Not all platforms support this option.
- * \param default_location the default folder or file to start the dialog at.
- *                         May be NULL. Not all platforms support this option.
+ * \param default_location the default folder or file to start the dialog at,
+ *                         may be NULL. Not all platforms support this option.
  * \param allow_many if non-zero, the user will be allowed to select multiple
  *                   entries. Not all platforms support this option.
  *
- * \since This function is available since SDL 3.0.0.
+ * \since This function is available since SDL 3.1.3.
  *
  * \sa SDL_DialogFileCallback
  * \sa SDL_ShowOpenFileDialog
  * \sa SDL_ShowSaveFileDialog
  */
-extern SDL_DECLSPEC void SDLCALL SDL_ShowOpenFolderDialog(SDL_DialogFileCallback callback, void *userdata, SDL_Window *window, const char *default_location, SDL_bool allow_many);
+extern SDL_DECLSPEC void SDLCALL SDL_ShowOpenFolderDialog(SDL_DialogFileCallback callback, void *userdata, SDL_Window *window, const char *default_location, bool allow_many);
 
 /* Ends C function definitions when using C++ */
 #ifdef __cplusplus
@@ -261,4 +262,4 @@ extern SDL_DECLSPEC void SDLCALL SDL_ShowOpenFolderDialog(SDL_DialogFileCallback
 #endif
 #include <SDL3/SDL_close_code.h>
 
-#endif /* SDL_joystick_h_ */
+#endif /* SDL_dialog_h_ */
