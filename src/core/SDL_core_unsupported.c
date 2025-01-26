@@ -184,7 +184,7 @@ bool SDL_ShowAndroidToast(const char* message, int duration, int gravity, int xo
 
 SDL_DECLSPEC void *SDLCALL SDL_AndroidGetNativeWindow(void);
 void* SDL_AndroidGetNativeWindow(void) {
-    return SDL_Unsupported();
+    return NULL;
 }
 
 SDL_DECLSPEC int SDLCALL SDL_GetAndroidSDKVersion(void);
