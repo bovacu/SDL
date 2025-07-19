@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -60,12 +60,13 @@ typedef struct
     bool updateSize;
     bool beginScene;
     bool enableSeparateAlphaBlend;
-    D3DTEXTUREFILTERTYPE scaleMode[3];
-    SDL_TextureAddressMode addressMode[3];
+    SDL_ScaleMode scaleMode[3];
+    SDL_TextureAddressMode addressModeU[3];
+    SDL_TextureAddressMode addressModeV[3];
     IDirect3DSurface9 *defaultRenderTarget;
     IDirect3DSurface9 *currentRenderTarget;
     void *d3dxDLL;
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     LPDIRECT3DPIXELSHADER9 shaders[NUM_SHADERS];
 #endif
     LPDIRECT3DVERTEXBUFFER9 vertexBuffers[8];
@@ -89,11 +90,10 @@ typedef struct
 typedef struct
 {
     D3D_TextureRep texture;
-    D3DTEXTUREFILTERTYPE scaleMode;
     D3D9_Shader shader;
     const float *shader_params;
 
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     // YV12 texture support
     bool yuv;
     D3D_TextureRep utexture;
@@ -274,10 +274,17 @@ static void D3D_InitRenderState(D3D_RenderData *data)
     IDirect3DDevice9_SetTransform(device, D3DTS_VIEW, &matrix);
 
     // Reset our current scale mode
-    SDL_memset(data->scaleMode, 0xFF, sizeof(data->scaleMode));
+    for (int i = 0; i < SDL_arraysize(data->scaleMode); ++i) {
+        data->scaleMode[i] = SDL_SCALEMODE_INVALID;
+    }
 
     // Reset our current address mode
-    SDL_zeroa(data->addressMode);
+    for (int i = 0; i < SDL_arraysize(data->addressModeU); ++i) {
+        data->addressModeU[i] = SDL_TEXTURE_ADDRESS_INVALID;
+    }
+    for (int i = 0; i < SDL_arraysize(data->addressModeV); ++i) {
+        data->addressModeV[i] = SDL_TEXTURE_ADDRESS_INVALID;
+    }
 
     // Start the render with beginScene
     data->beginScene = true;
@@ -533,7 +540,6 @@ static bool D3D_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL_
     if (!texturedata) {
         return false;
     }
-    texturedata->scaleMode = (texture->scaleMode == SDL_SCALEMODE_NEAREST) ? D3DTEXF_POINT : D3DTEXF_LINEAR;
 
     texture->internal = texturedata;
 
@@ -546,7 +552,7 @@ static bool D3D_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture, SDL_
     if (!D3D_CreateTextureRep(data->device, &texturedata->texture, usage, texture->format, PixelFormatToD3DFMT(texture->format), texture->w, texture->h)) {
         return false;
     }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     if (texture->format == SDL_PIXELFORMAT_YV12 ||
         texture->format == SDL_PIXELFORMAT_IYUV) {
         texturedata->yuv = true;
@@ -581,7 +587,7 @@ static bool D3D_RecreateTexture(SDL_Renderer *renderer, SDL_Texture *texture)
     if (!D3D_RecreateTextureRep(data->device, &texturedata->texture)) {
         return false;
     }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     if (texturedata->yuv) {
         if (!D3D_RecreateTextureRep(data->device, &texturedata->utexture)) {
             return false;
@@ -608,7 +614,7 @@ static bool D3D_UpdateTexture(SDL_Renderer *renderer, SDL_Texture *texture,
     if (!D3D_UpdateTextureRep(data->device, &texturedata->texture, rect->x, rect->y, rect->w, rect->h, pixels, pitch)) {
         return false;
     }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     if (texturedata->yuv) {
         // Skip to the correct offset into the next texture
         pixels = (const void *)((const Uint8 *)pixels + rect->h * pitch);
@@ -627,7 +633,7 @@ static bool D3D_UpdateTexture(SDL_Renderer *renderer, SDL_Texture *texture,
     return true;
 }
 
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
 static bool D3D_UpdateTextureYUV(SDL_Renderer *renderer, SDL_Texture *texture,
                                 const SDL_Rect *rect,
                                 const Uint8 *Yplane, int Ypitch,
@@ -664,7 +670,7 @@ static bool D3D_LockTexture(SDL_Renderer *renderer, SDL_Texture *texture,
     if (!texturedata) {
         return SDL_SetError("Texture is not currently available");
     }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     texturedata->locked_rect = *rect;
 
     if (texturedata->yuv) {
@@ -714,7 +720,7 @@ static void D3D_UnlockTexture(SDL_Renderer *renderer, SDL_Texture *texture)
     if (!texturedata) {
         return;
     }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     if (texturedata->yuv) {
         const SDL_Rect *rect = &texturedata->locked_rect;
         void *pixels =
@@ -734,17 +740,6 @@ static void D3D_UnlockTexture(SDL_Renderer *renderer, SDL_Texture *texture)
             IDirect3DDevice9_SetTexture(data->device, 0, NULL);
         }
     }
-}
-
-static void D3D_SetTextureScaleMode(SDL_Renderer *renderer, SDL_Texture *texture, SDL_ScaleMode scaleMode)
-{
-    D3D_TextureData *texturedata = (D3D_TextureData *)texture->internal;
-
-    if (!texturedata) {
-        return;
-    }
-
-    texturedata->scaleMode = (scaleMode == SDL_SCALEMODE_NEAREST) ? D3DTEXF_POINT : D3DTEXF_LINEAR;
 }
 
 static bool D3D_SetRenderTargetInternal(SDL_Renderer *renderer, SDL_Texture *texture)
@@ -926,35 +921,52 @@ static bool BindTextureRep(IDirect3DDevice9 *device, D3D_TextureRep *texture, DW
     return true;
 }
 
-static void UpdateTextureScaleMode(D3D_RenderData *data, D3D_TextureData *texturedata, unsigned index)
+static void UpdateTextureScaleMode(D3D_RenderData *data, SDL_ScaleMode scaleMode, unsigned index)
 {
-    if (texturedata->scaleMode != data->scaleMode[index]) {
-        IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_MINFILTER, texturedata->scaleMode);
-        IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_MAGFILTER, texturedata->scaleMode);
-        data->scaleMode[index] = texturedata->scaleMode;
-    }
-}
-
-static void UpdateTextureAddressMode(D3D_RenderData *data, SDL_TextureAddressMode addressMode, unsigned index)
-{
-    if (addressMode != data->addressMode[index]) {
-        switch (addressMode) {
-        case SDL_TEXTURE_ADDRESS_CLAMP:
-            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    if (scaleMode != data->scaleMode[index]) {
+        switch (scaleMode) {
+        case SDL_SCALEMODE_PIXELART:
+        case SDL_SCALEMODE_NEAREST:
+            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
             break;
-        case SDL_TEXTURE_ADDRESS_WRAP:
-            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
-            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
+        case SDL_SCALEMODE_LINEAR:
+            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
             break;
         default:
             break;
         }
-        data->addressMode[index] = addressMode;
+        data->scaleMode[index] = scaleMode;
     }
 }
 
-static bool SetupTextureState(D3D_RenderData *data, SDL_Texture *texture, SDL_TextureAddressMode addressMode, D3D9_Shader *shader, const float **shader_params)
+static DWORD TranslateAddressMode(SDL_TextureAddressMode addressMode)
+{
+    switch (addressMode) {
+    case SDL_TEXTURE_ADDRESS_CLAMP:
+        return D3DTADDRESS_CLAMP;
+    case SDL_TEXTURE_ADDRESS_WRAP:
+        return D3DTADDRESS_WRAP;
+    default:
+        SDL_assert(!"Unknown texture address mode");
+        return D3DTADDRESS_CLAMP;
+    }
+}
+
+static void UpdateTextureAddressMode(D3D_RenderData *data, SDL_TextureAddressMode addressModeU, SDL_TextureAddressMode addressModeV, unsigned index)
+{
+    if (addressModeU != data->addressModeU[index]) {
+        IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_ADDRESSU, TranslateAddressMode(addressModeU));
+        data->addressModeU[index] = addressModeU;
+    }
+    if (addressModeV != data->addressModeV[index]) {
+        IDirect3DDevice9_SetSamplerState(data->device, index, D3DSAMP_ADDRESSV, TranslateAddressMode(addressModeV));
+        data->addressModeV[index] = addressModeV;
+    }
+}
+
+static bool SetupTextureState(D3D_RenderData *data, SDL_Texture *texture, D3D9_Shader *shader, const float **shader_params)
 {
     D3D_TextureData *texturedata = (D3D_TextureData *)texture->internal;
 
@@ -962,22 +974,14 @@ static bool SetupTextureState(D3D_RenderData *data, SDL_Texture *texture, SDL_Te
         return SDL_SetError("Texture is not currently available");
     }
 
-    UpdateTextureScaleMode(data, texturedata, 0);
-    UpdateTextureAddressMode(data, addressMode, 0);
-
     *shader = texturedata->shader;
     *shader_params = texturedata->shader_params;
 
     if (!BindTextureRep(data->device, &texturedata->texture, 0)) {
         return false;
     }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     if (texturedata->yuv) {
-        UpdateTextureScaleMode(data, texturedata, 1);
-        UpdateTextureScaleMode(data, texturedata, 2);
-        UpdateTextureAddressMode(data, addressMode, 1);
-        UpdateTextureAddressMode(data, addressMode, 2);
-
         if (!BindTextureRep(data->device, &texturedata->utexture, 1)) {
             return false;
         }
@@ -995,7 +999,7 @@ static bool SetDrawState(D3D_RenderData *data, const SDL_RenderCommand *cmd)
     const SDL_BlendMode blend = cmd->data.draw.blend;
 
     if (texture != data->drawstate.texture) {
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
         D3D_TextureData *oldtexturedata = data->drawstate.texture ? (D3D_TextureData *)data->drawstate.texture->internal : NULL;
         D3D_TextureData *newtexturedata = texture ? (D3D_TextureData *)texture->internal : NULL;
 #endif
@@ -1006,17 +1010,17 @@ static bool SetDrawState(D3D_RenderData *data, const SDL_RenderCommand *cmd)
         if (!texture) {
             IDirect3DDevice9_SetTexture(data->device, 0, NULL);
         }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
         if ((!newtexturedata || !newtexturedata->yuv) && (oldtexturedata && oldtexturedata->yuv)) {
             IDirect3DDevice9_SetTexture(data->device, 1, NULL);
             IDirect3DDevice9_SetTexture(data->device, 2, NULL);
         }
 #endif
-        if (texture && !SetupTextureState(data, texture, cmd->data.draw.texture_address_mode, &shader, &shader_params)) {
+        if (texture && !SetupTextureState(data, texture, &shader, &shader_params)) {
             return false;
         }
 
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
         if (shader != data->drawstate.shader) {
             const HRESULT result = IDirect3DDevice9_SetPixelShader(data->device, data->shaders[shader]);
             if (FAILED(result)) {
@@ -1040,13 +1044,30 @@ static bool SetDrawState(D3D_RenderData *data, const SDL_RenderCommand *cmd)
         data->drawstate.texture = texture;
     } else if (texture) {
         D3D_TextureData *texturedata = (D3D_TextureData *)texture->internal;
-        UpdateDirtyTexture(data->device, &texturedata->texture);
-#if SDL_HAVE_YUV
-        if (texturedata->yuv) {
-            UpdateDirtyTexture(data->device, &texturedata->utexture);
-            UpdateDirtyTexture(data->device, &texturedata->vtexture);
+        if (texturedata) {
+            UpdateDirtyTexture(data->device, &texturedata->texture);
+#ifdef SDL_HAVE_YUV
+            if (texturedata->yuv) {
+                UpdateDirtyTexture(data->device, &texturedata->utexture);
+                UpdateDirtyTexture(data->device, &texturedata->vtexture);
+            }
+#endif // SDL_HAVE_YUV
         }
-#endif
+    }
+
+    if (texture) {
+        UpdateTextureScaleMode(data, cmd->data.draw.texture_scale_mode, 0);
+        UpdateTextureAddressMode(data, cmd->data.draw.texture_address_mode_u, cmd->data.draw.texture_address_mode_v, 0);
+
+#ifdef SDL_HAVE_YUV
+        D3D_TextureData *texturedata = (D3D_TextureData *)texture->internal;
+        if (texturedata && texturedata->yuv) {
+            UpdateTextureScaleMode(data, cmd->data.draw.texture_scale_mode, 1);
+            UpdateTextureScaleMode(data, cmd->data.draw.texture_scale_mode, 2);
+            UpdateTextureAddressMode(data, cmd->data.draw.texture_address_mode_u, cmd->data.draw.texture_address_mode_v, 1);
+            UpdateTextureAddressMode(data, cmd->data.draw.texture_address_mode_u, cmd->data.draw.texture_address_mode_v, 2);
+        }
+#endif // SDL_HAVE_YUV
     }
 
     if (blend != data->drawstate.blend) {
@@ -1424,7 +1445,7 @@ static void D3D_DestroyTexture(SDL_Renderer *renderer, SDL_Texture *texture)
         renderdata->drawstate.shader_params = NULL;
         IDirect3DDevice9_SetPixelShader(renderdata->device, NULL);
         IDirect3DDevice9_SetTexture(renderdata->device, 0, NULL);
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
         if (data->yuv) {
             IDirect3DDevice9_SetTexture(renderdata->device, 1, NULL);
             IDirect3DDevice9_SetTexture(renderdata->device, 2, NULL);
@@ -1437,7 +1458,7 @@ static void D3D_DestroyTexture(SDL_Renderer *renderer, SDL_Texture *texture)
     }
 
     D3D_DestroyTextureRep(&data->texture);
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     D3D_DestroyTextureRep(&data->utexture);
     D3D_DestroyTextureRep(&data->vtexture);
     SDL_free(data->pixels);
@@ -1462,7 +1483,7 @@ static void D3D_DestroyRenderer(SDL_Renderer *renderer)
             IDirect3DSurface9_Release(data->currentRenderTarget);
             data->currentRenderTarget = NULL;
         }
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
         for (i = 0; i < SDL_arraysize(data->shaders); ++i) {
             if (data->shaders[i]) {
                 IDirect3DPixelShader9_Release(data->shaders[i]);
@@ -1559,8 +1580,9 @@ static bool D3D_Reset(SDL_Renderer *renderer)
     // Let the application know that render targets were reset
     {
         SDL_Event event;
+        SDL_zero(event);
         event.type = SDL_EVENT_RENDER_TARGETS_RESET;
-        event.common.timestamp = 0;
+        event.render.windowID = SDL_GetWindowID(SDL_GetRenderWindow(renderer));
         SDL_PushEvent(&event);
     }
 
@@ -1647,12 +1669,11 @@ static bool D3D_CreateRenderer(SDL_Renderer *renderer, SDL_Window *window, SDL_P
     renderer->SupportsBlendMode = D3D_SupportsBlendMode;
     renderer->CreateTexture = D3D_CreateTexture;
     renderer->UpdateTexture = D3D_UpdateTexture;
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     renderer->UpdateTextureYUV = D3D_UpdateTextureYUV;
 #endif
     renderer->LockTexture = D3D_LockTexture;
     renderer->UnlockTexture = D3D_UnlockTexture;
-    renderer->SetTextureScaleMode = D3D_SetTextureScaleMode;
     renderer->SetRenderTarget = D3D_SetRenderTarget;
     renderer->QueueSetViewport = D3D_QueueNoOp;
     renderer->QueueSetDrawColor = D3D_QueueNoOp;
@@ -1750,7 +1771,7 @@ static bool D3D_CreateRenderer(SDL_Renderer *renderer, SDL_Window *window, SDL_P
 
     // Set up parameters for rendering
     D3D_InitRenderState(data);
-#if SDL_HAVE_YUV
+#ifdef SDL_HAVE_YUV
     if (caps.MaxSimultaneousTextures >= 3) {
         int i;
         for (i = SHADER_NONE + 1; i < SDL_arraysize(data->shaders); ++i) {

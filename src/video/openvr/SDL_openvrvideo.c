@@ -22,7 +22,9 @@
 
 #ifdef SDL_VIDEO_DRIVER_OPENVR
 
+#if 0
 #define DEBUG_OPENVR
+#endif
 
 #include "../../events/SDL_mouse_c.h"
 #include "../../events/SDL_keyboard_c.h"
@@ -106,7 +108,7 @@ static BOOL (*ov_wglMakeCurrent)(HDC, HGLRC);
 #define OPENVR_DEFAULT_WIDTH 1920
 #define OPENVR_DEFAULT_HEIGHT 1080
 
-#define OPENVR_SetupProc(proc) { proc = (void*)SDL_GL_GetProcAddress((#proc)+3); if (!proc) { failed_extension = (#proc)+3; } }
+#define OPENVR_SetupProc(proc) { proc = (void *)SDL_GL_GetProcAddress((#proc)+3); if (!proc) { failed_extension = (#proc)+3; } }
 
 static bool OPENVR_InitExtensions(SDL_VideoDevice *_this)
 {
@@ -209,7 +211,7 @@ static bool OPENVR_VideoInit(SDL_VideoDevice *_this)
     }
 
     display.internal = (SDL_DisplayData *)data;
-    display.name = (char*)"OpenVRDisplay";
+    display.name = (char *)"OpenVRDisplay";
     SDL_AddVideoDisplay(&display, false);
 
     return true;
@@ -248,7 +250,7 @@ static uint32_t *ImageSDLToOpenVRGL(SDL_Surface * surf, bool bFlipY)
     int x, y;
     uint32_t * pxd = SDL_malloc(4 * surf->w * surf->h);
     for(y = 0; y < h; y++) {
-        uint32_t * iline = (uint32_t*)&(((uint8_t*)surf->pixels)[y*pitch]);
+        uint32_t * iline = (uint32_t *)&(((uint8_t *)surf->pixels)[y * pitch]);
         uint32_t * oline = &pxd[(bFlipY?(h-y-1):y)*w];
         for(x = 0; x < w; x++)
         {
@@ -428,7 +430,7 @@ static void OPENVR_VirtualControllerUpdate(void *userdata)
           xval *= -1.0f;
         if (a == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || a == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
           xval = xval * 2.0f - 1.0f;
-        //SDL_SetJoystickVirtualAxis(joystick, a, analog_input_action.x*32767);
+        //SDL_SetJoystickVirtualAxis(joystick, a, analog_input_action.x * 32767);
         xval *= SDL_JOYSTICK_AXIS_MAX;
         SDL_SetJoystickVirtualAxis(joystick, a, xval);
 #ifdef DEBUG_OPENVR
@@ -445,7 +447,7 @@ static void OPENVR_VirtualControllerUpdate(void *userdata)
 static bool OPENVR_SetupJoystickBasedOnLoadedActionManifest(SDL_VideoData * videodata)
 {
     SDL_VirtualJoystickDesc desc;
-    int virtual_index;
+    SDL_JoystickID virtual_id;
 
     EVRInputError e = 0;
 
@@ -537,22 +539,22 @@ static bool OPENVR_SetupJoystickBasedOnLoadedActionManifest(SDL_VideoData * vide
     desc.RumbleTriggers = OPENVR_VirtualControllerRumbleTriggers;
     desc.Update = OPENVR_VirtualControllerUpdate;
     desc.userdata = videodata;
-    virtual_index = SDL_AttachVirtualJoystick(&desc);
+    virtual_id = SDL_AttachVirtualJoystick(&desc);
 
-    if (virtual_index < 0) {
+    if (!virtual_id) {
+        return SDL_SetError("OPENVR: Couldn't attach virtual joystick device: %s", SDL_GetError());
+    }
+
+    videodata->virtual_joystick = SDL_OpenJoystick(virtual_id);
+    if (!videodata->virtual_joystick) {
         return SDL_SetError("OPENVR: Couldn't open virtual joystick device: %s", SDL_GetError());
-    } else {
-        videodata->virtual_joystick = SDL_OpenJoystick(virtual_index);
-        if (!videodata->virtual_joystick) {
-            return SDL_SetError("OPENVR: Couldn't open virtual joystick device: %s", SDL_GetError());
-        }
     }
 
 #ifdef DEBUG_OPENVR
     SDL_Log("Loaded virtual joystick with %d buttons and %d axes", videodata->input_action_handles_buttons_count, videodata->input_action_handles_axes_count);
 #endif
 
-    return false;
+    return true;
 }
 
 static bool OPENVR_InitializeOverlay(SDL_VideoDevice *_this,SDL_Window *window)
@@ -593,7 +595,7 @@ static bool OPENVR_InitializeOverlay(SDL_VideoDevice *_this,SDL_Window *window)
             return SDL_SetError("Could not create cursor overlay (%d)", result );
         }
         SDL_PropertiesID props = SDL_GetWindowProperties(window);
-        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_OPENVR_OVERLAY_ID, videodata->overlayID);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_OPENVR_OVERLAY_ID_NUMBER, videodata->overlayID);
         SDL_free(cursorname);
         videodata->bHasShownOverlay = false;
     }
@@ -661,7 +663,7 @@ static bool OPENVR_SetupFrame(SDL_VideoDevice *_this, SDL_Window *window)
     {
         int error = ov_glGetError();
         if (error)
-            SDL_Log("Found GL Error before beginning frame: %d / (Framebuffer:%d)\n", error, ov_glCheckNamedFramebufferStatus(videodata->fbo, GL_FRAMEBUFFER));
+            SDL_Log("Found GL Error before beginning frame: %d / (Framebuffer:%d)", error, ov_glCheckNamedFramebufferStatus(videodata->fbo, GL_FRAMEBUFFER));
     }
 #endif
 
@@ -698,7 +700,7 @@ static bool OPENVR_ReleaseFrame(SDL_VideoDevice *_this)
     {
         int error = ov_glGetError();
         if (error) {
-            SDL_Log("Found GL Error before release frame: %d / (Framebuffer:%d)\n", error, ov_glCheckNamedFramebufferStatus(videodata->fbo, GL_FRAMEBUFFER));
+            SDL_Log("Found GL Error before release frame: %d / (Framebuffer:%d)", error, ov_glCheckNamedFramebufferStatus(videodata->fbo, GL_FRAMEBUFFER));
         }
     }
 #endif
@@ -710,7 +712,7 @@ static bool OPENVR_ReleaseFrame(SDL_VideoDevice *_this)
     if (videodata->overlaytexture != 0 &&
         videodata->targh == videodata->last_targh &&
         videodata->targw == videodata->last_targw) {
-        // Only submit frames to OpenVR if the textu re exists.
+        // Only submit frames to OpenVR if the texture exists.
         struct Texture_t tex;
 
         // Setup a Texture_t object to send in the texture.
@@ -895,7 +897,7 @@ static SDL_GLContext OPENVR_GL_CreateContext(SDL_VideoDevice *_this, SDL_Window 
         const char *ccc = (const char *)ov_glGetStringi(GL_EXTENSIONS, i);
         if (SDL_strcmp(ccc, "GL_KHR_debug") == 0) {
 #ifdef DEBUG_OPENVR
-            SDL_Log("Found renderdoc debug extension.\n");
+            SDL_Log("Found renderdoc debug extension.");
 #endif
             videodata->renderdoc_debugmarker_frame_end = true;
         }
@@ -911,7 +913,7 @@ static SDL_GLContext OPENVR_GL_CreateContext(SDL_VideoDevice *_this, SDL_Window 
 
     OPENVR_SetupFrame(_this, window);
 
-    SDL_GLContext result = malloc(sizeof(struct SDL_GLContextState));
+    SDL_GLContext result = SDL_malloc(sizeof(struct SDL_GLContextState));
     if (!result) {
         return NULL;
     }
@@ -968,7 +970,7 @@ static bool SDL_EGL_InitInternal(SDL_VideoData * vd)
 
     vd->eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 #ifdef DEBUG_OPENVR
-    SDL_Log("EGL Display: %p\n", vd->eglDpy);
+    SDL_Log("EGL Display: %p", vd->eglDpy);
 #endif
 
     if (vd->eglDpy == 0) {
@@ -1037,10 +1039,10 @@ static SDL_GLContext OVR_EGL_CreateContext(SDL_VideoDevice *_this, SDL_Window * 
 
     ov_glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions);
     for(int i = 0; i < numExtensions; i++) {
-        const char * ccc = (const char*)ov_glGetStringi(GL_EXTENSIONS, i);
+        const char * ccc = (const char *)ov_glGetStringi(GL_EXTENSIONS, i);
         if (SDL_strcmp(ccc, "GL_KHR_debug") == 0) {
 #ifdef DEBUG_OPENVR
-           SDL_Log("Found renderdoc debug extension.\n");
+           SDL_Log("Found renderdoc debug extension.");
 #endif
            videodata->renderdoc_debugmarker_frame_end = true;
         }
@@ -1138,12 +1140,12 @@ static void OPENVR_SetWindowSize(SDL_VideoDevice *_this, SDL_Window *window)
 {
     SDL_VideoData *data = (SDL_VideoData *)_this->internal;
 
-    if (window->floating.w != window->w) {
-        window->w = window->floating.w;
+    if (window->pending.w != window->w) {
+        window->w = window->pending.w;
     }
 
-    if (window->floating.h != window->h) {
-        window->h = window->floating.h;
+    if (window->pending.h != window->h) {
+        window->h = window->pending.h;
     }
 
     if (data->targh != window->h || data->targw != window->w) {
@@ -1210,9 +1212,11 @@ static bool OPENVR_GL_SwapWindow(SDL_VideoDevice *_this, SDL_Window *window)
 static void OPENVR_HandleMouse(float x, float y, int btn, int evt)
 {
     if (evt == 2) {
-        SDL_SendMouseMotion(0, 0, 0, false, (int)x, (int)y);
+        SDL_SendMouseMotion(0, NULL, SDL_GLOBAL_MOUSE_ID, false, x, y);
     } else {
-        SDL_SendMouseButton(0, 0, 0, btn + 1, (evt != 0));
+        const Uint8 button = SDL_BUTTON_LEFT + btn;
+        const bool down = (evt != 0);
+        SDL_SendMouseButton(0, NULL, SDL_GLOBAL_MOUSE_ID, button, down);
     }
 }
 
@@ -1323,7 +1327,7 @@ static bool OPENVR_ShowCursor(SDL_Cursor * cursor)
     hotspot.v[0] = (float)ovrc->hot_x / (float)ovrc->w;
     hotspot.v[1] = (float)ovrc->hot_y / (float)ovrc->h;
 
-    texture.handle = (void*)(intptr_t)(ovrc->texture_id_handle);
+    texture.handle = (void *)(intptr_t)(ovrc->texture_id_handle);
     texture.eType = ETextureType_TextureType_OpenGL;
     texture.eColorSpace = EColorSpace_ColorSpace_Auto;
 
@@ -1391,7 +1395,7 @@ static bool OPENVR_SetWindowIcon(SDL_VideoDevice *_this, SDL_Window * window, SD
     SDL_free(pixels);
     ov_glBindTexture(GL_TEXTURE_2D, 0);
 
-    texture.handle = (void*)(intptr_t)(texture_id_handle);
+    texture.handle = (void *)(intptr_t)(texture_id_handle);
     texture.eType = ETextureType_TextureType_OpenGL;
     texture.eColorSpace = EColorSpace_ColorSpace_Auto;
 
@@ -1655,7 +1659,7 @@ error:
 }
 
 VideoBootStrap OPENVR_bootstrap = {
-    "openvr", "SDL OpenVR video driver", OPENVR_CreateDevice
+    "openvr", "SDL OpenVR video driver", OPENVR_CreateDevice, NULL, false
 };
 
 #endif // SDL_VIDEO_DRIVER_WINDOWS

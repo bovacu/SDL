@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -48,11 +48,86 @@ static SDL_FullscreenResult Emscripten_SetWindowFullscreen(SDL_VideoDevice *_thi
 static void Emscripten_PumpEvents(SDL_VideoDevice *_this);
 static void Emscripten_SetWindowTitle(SDL_VideoDevice *_this, SDL_Window *window);
 
+static bool pumpevents_has_run = false;
+static int pending_swap_interval = -1;
+
+
 // Emscripten driver bootstrap functions
 
 static void Emscripten_DeleteDevice(SDL_VideoDevice *device)
 {
     SDL_free(device);
+}
+
+static SDL_SystemTheme Emscripten_GetSystemTheme(void)
+{
+    /* Technically, light theme can mean explicit light theme or no preference.
+       https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-color-scheme#syntax */
+
+    int theme_code = MAIN_THREAD_EM_ASM_INT({
+        if (!window.matchMedia) {
+            return -1;
+        }
+
+        if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+            return 0;
+        }
+
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            return 1;
+        }
+
+        return -1;
+    });
+
+    switch (theme_code) {
+    case 0:
+        return SDL_SYSTEM_THEME_LIGHT;
+
+    case 1:
+        return SDL_SYSTEM_THEME_DARK;
+
+    default:
+        return SDL_SYSTEM_THEME_UNKNOWN;
+    }
+}
+
+static void Emscripten_ListenSystemTheme(void)
+{
+    MAIN_THREAD_EM_ASM({
+        if (window.matchMedia) {
+            if (typeof(Module['SDL3']) === 'undefined') {
+                Module['SDL3'] = {};
+            }
+
+            var SDL3 = Module['SDL3'];
+
+            SDL3.eventHandlerThemeChanged = function(event) {
+                _Emscripten_SendSystemThemeChangedEvent();
+            };
+
+            SDL3.themeChangedMatchMedia = window.matchMedia('(prefers-color-scheme: dark)');
+            SDL3.themeChangedMatchMedia.addEventListener('change', SDL3.eventHandlerThemeChanged);
+        }
+    });
+}
+
+static void Emscripten_UnlistenSystemTheme(void)
+{
+    MAIN_THREAD_EM_ASM({
+        if (typeof(Module['SDL3']) !== 'undefined') {
+            var SDL3 = Module['SDL3'];
+
+            SDL3.themeChangedMatchMedia.removeEventListener('change', SDL3.eventHandlerThemeChanged);
+            SDL3.themeChangedMatchMedia = undefined;
+            SDL3.eventHandlerThemeChanged = undefined;
+        }
+    });
+}
+
+EMSCRIPTEN_KEEPALIVE void Emscripten_SendSystemThemeChangedEvent(void)
+{
+    SDL_SetSystemTheme(Emscripten_GetSystemTheme());
 }
 
 static SDL_VideoDevice *Emscripten_CreateDevice(void)
@@ -111,13 +186,188 @@ static SDL_VideoDevice *Emscripten_CreateDevice(void)
 
     device->free = Emscripten_DeleteDevice;
 
+    Emscripten_ListenSystemTheme();
+    device->system_theme = Emscripten_GetSystemTheme();
+
     return device;
+}
+
+static bool Emscripten_ShowMessagebox(const SDL_MessageBoxData *messageboxdata, int *buttonID) {
+    if (emscripten_has_asyncify() && SDL_GetHintBoolean(SDL_HINT_EMSCRIPTEN_ASYNCIFY, true)) {
+        char dialog_background[32];
+        char dialog_color[32];
+        char button_border[32];
+        char button_background[32];
+        char button_hovered[32];
+
+        if (messageboxdata->colorScheme) {
+            SDL_MessageBoxColor color = messageboxdata->colorScheme->colors[SDL_MESSAGEBOX_COLOR_BACKGROUND];
+            SDL_snprintf(dialog_background, sizeof(dialog_background), "rgb(%u, %u, %u)", color.r, color.g, color.b);
+
+            color = messageboxdata->colorScheme->colors[SDL_MESSAGEBOX_COLOR_TEXT];
+            SDL_snprintf(dialog_color, sizeof(dialog_color), "rgb(%u, %u, %u)", color.r, color.g, color.b);
+
+            color = messageboxdata->colorScheme->colors[SDL_MESSAGEBOX_COLOR_BUTTON_BORDER];
+            SDL_snprintf(button_border, sizeof(button_border), "rgb(%u, %u, %u)", color.r, color.g, color.b);
+
+            color = messageboxdata->colorScheme->colors[SDL_MESSAGEBOX_COLOR_BUTTON_BACKGROUND];
+            SDL_snprintf(button_background, sizeof(button_background), "rgb(%u, %u, %u)", color.r, color.g, color.b);
+
+            color = messageboxdata->colorScheme->colors[SDL_MESSAGEBOX_COLOR_BUTTON_SELECTED];
+            SDL_snprintf(button_hovered, sizeof(button_hovered), "rgb(%u, %u, %u)", color.r, color.g, color.b);
+        } else {
+            SDL_zero(dialog_background);
+            SDL_zero(dialog_color);
+            SDL_zero(button_border);
+            SDL_zero(button_background);
+            SDL_zero(button_hovered);
+        }
+
+        // TODO: Handle parent window when multiple windows can be added in Emscripten builds
+        char dialog_id[64];
+        SDL_snprintf(dialog_id, sizeof(dialog_id), "SDL3_messagebox_%u", SDL_rand_bits());
+        EM_ASM({
+            var title = UTF8ToString($0);
+            var message = UTF8ToString($1);
+            var background = UTF8ToString($2);
+            var color = UTF8ToString($3);
+            var id = UTF8ToString($4);
+
+            // Dialogs are always put in the front of the DOM
+            var dialog = document.createElement("dialog");
+            // Set class to allow for CSS selectors
+            dialog.classList.add("SDL3_messagebox");
+            dialog.id = id;
+            dialog.style.color = color;
+            dialog.style.backgroundColor = background;
+            document.body.append(dialog);
+
+            var h1 = document.createElement("h1");
+            h1.innerText = title;
+            dialog.append(h1);
+
+            var p = document.createElement("p");
+            p.innerText = message;
+            dialog.append(p);
+
+            dialog.showModal();
+        }, messageboxdata->title, messageboxdata->message, dialog_background, dialog_color, dialog_id);
+
+        int i;
+        for (i = 0; i < messageboxdata->numbuttons; ++i) {
+            SDL_MessageBoxButtonData button = messageboxdata->buttons[i];
+
+            const int created = EM_ASM_INT({
+                    var dialog_id = UTF8ToString($0);
+                    var text = UTF8ToString($1);
+                    var responseId = $2;
+                    var clickOnReturn = $3;
+                    var clickOnEscape = $4;
+                    var border = UTF8ToString($5);
+                    var background = UTF8ToString($6);
+                    var hovered = UTF8ToString($7);
+
+                    var dialog = document.getElementById(dialog_id);
+                    if (!dialog) {
+                        return false;
+                    }
+
+                    var button = document.createElement("button");
+                    button.innerText = text;
+                    button.style.borderColor = border;
+                    button.style.backgroundColor = background;
+
+                    dialog.addEventListener('keydown', function(e) {
+                        if (clickOnReturn && e.key === "Enter") {
+                            e.preventDefault();
+                            button.click();
+                        } else if (clickOnEscape && e.key === "Escape") {
+                            e.preventDefault();
+                            button.click();
+                        }
+                    });
+                    dialog.addEventListener('cancel', function(e){
+                        e.preventDefault();
+                    });
+
+                    button.onmouseenter = function(e){
+                        button.style.backgroundColor = hovered;
+                    };
+                    button.onmouseleave = function(e){
+                        button.style.backgroundColor = background;
+                    };
+                    button.onclick = function(e) {
+                        dialog.close(responseId);
+                    };
+
+                    dialog.append(button);
+                    return true;
+                },
+                dialog_id,
+                button.text,
+                button.buttonID,
+                button.flags & SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,
+                button.flags & SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,
+                button_border,
+                button_background,
+                button_hovered
+            );
+
+            if (!created) {
+                return false;
+            }
+        }
+
+        while (true) {
+            // give back control to browser for screen refresh
+            emscripten_sleep(0);
+
+            const int dialog_open = EM_ASM_INT({
+                var dialog_id = UTF8ToString($0);
+
+                var dialog = document.getElementById(dialog_id);
+                if (!dialog) {
+                    return false;
+                }
+                return dialog.open;
+            }, dialog_id);
+
+            if (dialog_open) {
+                continue;
+            }
+
+            *buttonID = EM_ASM_INT({
+                var dialog_id = UTF8ToString($0);
+                var dialog = document.getElementById(dialog_id);
+                if (!dialog) {
+                    return 0;
+                }
+                try
+                {
+                    return parseInt(dialog.returnValue);
+                }
+                catch(e)
+                {
+                    return 0;
+                }
+            }, dialog_id);
+            break;
+        }
+
+    } else {
+        // Cannot add elements to DOM and block without Asyncify. So, fall back to the alert function.
+        EM_ASM({
+            alert(UTF8ToString($0) + "\n\n" + UTF8ToString($1));
+        }, messageboxdata->title, messageboxdata->message);
+    }
+    return true;
 }
 
 VideoBootStrap Emscripten_bootstrap = {
     EMSCRIPTENVID_DRIVER_NAME, "SDL emscripten video driver",
     Emscripten_CreateDevice,
-    NULL // no ShowMessageBox implementation
+    Emscripten_ShowMessagebox,
+    false
 };
 
 bool Emscripten_VideoInit(SDL_VideoDevice *_this)
@@ -140,6 +390,8 @@ bool Emscripten_VideoInit(SDL_VideoDevice *_this)
     SDL_AddKeyboard(SDL_DEFAULT_KEYBOARD_ID, NULL, false);
     SDL_AddMouse(SDL_DEFAULT_MOUSE_ID, NULL, false);
 
+    Emscripten_RegisterGlobalEventHandlers(_this);
+
     // We're done!
     return true;
 }
@@ -152,7 +404,11 @@ static bool Emscripten_SetDisplayMode(SDL_VideoDevice *_this, SDL_VideoDisplay *
 
 static void Emscripten_VideoQuit(SDL_VideoDevice *_this)
 {
+    Emscripten_UnregisterGlobalEventHandlers(_this);
     Emscripten_QuitMouse();
+    Emscripten_UnlistenSystemTheme();
+    pumpevents_has_run = false;
+    pending_swap_interval = -1;
 }
 
 static bool Emscripten_GetDisplayUsableBounds(SDL_VideoDevice *_this, SDL_VideoDisplay *display, SDL_Rect *rect)
@@ -170,9 +426,31 @@ static bool Emscripten_GetDisplayUsableBounds(SDL_VideoDevice *_this, SDL_VideoD
     return true;
 }
 
+bool Emscripten_ShouldSetSwapInterval(int interval)
+{
+    if (!pumpevents_has_run) {
+        pending_swap_interval = interval;
+        return false;
+    }
+    return true;
+}
+
 static void Emscripten_PumpEvents(SDL_VideoDevice *_this)
 {
-    // do nothing.
+    if (!pumpevents_has_run) {
+        // we assume you've set a mainloop by the time you've called pumpevents, so we delay initial SetInterval changes until then.
+        // otherwise you'll get a warning on the javascript console.
+        pumpevents_has_run = true;
+        if (pending_swap_interval >= 0) {
+            Emscripten_GLES_SetSwapInterval(_this, pending_swap_interval);
+            pending_swap_interval = -1;
+        }
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE void requestFullscreenThroughSDL(SDL_Window *window)
+{
+    SDL_SetWindowFullscreen(window, true);
 }
 
 static bool Emscripten_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID props)
@@ -189,11 +467,16 @@ static bool Emscripten_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, 
     }
 
     selector = SDL_GetHint(SDL_HINT_EMSCRIPTEN_CANVAS_SELECTOR);
-    if (!selector) {
-        selector = "#canvas";
+    if (!selector || !*selector) {
+        selector = SDL_GetStringProperty(props, SDL_PROP_WINDOW_CREATE_EMSCRIPTEN_CANVAS_ID_STRING, "#canvas");
     }
-
     wdata->canvas_id = SDL_strdup(selector);
+
+    selector = SDL_GetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT);
+    if (!selector || !*selector) {
+        selector = SDL_GetStringProperty(props, SDL_PROP_WINDOW_CREATE_EMSCRIPTEN_KEYBOARD_ELEMENT_STRING, "#window");
+    }
+    wdata->keyboard_element = SDL_strdup(selector);
 
     if (window->flags & SDL_WINDOW_HIGH_PIXEL_DENSITY) {
         wdata->pixel_ratio = emscripten_get_device_pixel_ratio();
@@ -238,6 +521,17 @@ static bool Emscripten_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, 
 
     Emscripten_RegisterEventHandlers(wdata);
 
+    // disable the emscripten "fullscreen" button.
+    MAIN_THREAD_EM_ASM({
+        Module['requestFullscreen'] = function(lockPointer, resizeCanvas) {
+            _requestFullscreenThroughSDL($0);
+        };
+    }, window);
+
+    // Ensure canvas_id and keyboard_element are added to the window's properties
+    SDL_SetStringProperty(window->props, SDL_PROP_WINDOW_EMSCRIPTEN_CANVAS_ID_STRING, wdata->canvas_id);
+    SDL_SetStringProperty(window->props, SDL_PROP_WINDOW_EMSCRIPTEN_KEYBOARD_ELEMENT_STRING, wdata->keyboard_element);
+
     // Window has been successfully created
     return true;
 }
@@ -252,14 +546,14 @@ static void Emscripten_SetWindowSize(SDL_VideoDevice *_this, SDL_Window *window)
         if (window->flags & SDL_WINDOW_HIGH_PIXEL_DENSITY) {
             data->pixel_ratio = emscripten_get_device_pixel_ratio();
         }
-        emscripten_set_canvas_element_size(data->canvas_id, SDL_lroundf(window->floating.w * data->pixel_ratio), SDL_lroundf(window->floating.h * data->pixel_ratio));
+        emscripten_set_canvas_element_size(data->canvas_id, SDL_lroundf(window->pending.w * data->pixel_ratio), SDL_lroundf(window->pending.h * data->pixel_ratio));
 
         // scale canvas down
         if (!data->external_size && data->pixel_ratio != 1.0f) {
-            emscripten_set_element_css_size(data->canvas_id, window->floating.w, window->floating.h);
+            emscripten_set_element_css_size(data->canvas_id, window->pending.w, window->pending.h);
         }
 
-        SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, window->floating.w, window->floating.h);
+        SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, window->pending.w, window->pending.h);
     }
 }
 
@@ -286,9 +580,14 @@ static void Emscripten_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
         emscripten_set_canvas_element_size(data->canvas_id, 0, 0);
         SDL_free(data->canvas_id);
 
+        SDL_free(data->keyboard_element);
+
         SDL_free(window->internal);
         window->internal = NULL;
     }
+
+    // just ignore clicks on the fullscreen button while there's no SDL window.
+    MAIN_THREAD_EM_ASM({ Module['requestFullscreen'] = function(lockPointer, resizeCanvas) {}; });
 }
 
 static SDL_FullscreenResult Emscripten_SetWindowFullscreen(SDL_VideoDevice *_this, SDL_Window *window, SDL_VideoDisplay *display, SDL_FullscreenOp fullscreen)

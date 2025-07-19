@@ -1,6 +1,6 @@
 /*
  *  Simple DirectMedia Layer
- *  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+ *  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
  *
  *  This software is provided 'as-is', without any express or implied
  *  warranty.  In no event will the authors be held liable for any damages
@@ -51,7 +51,12 @@
 #define EGL_COLOR_COMPONENT_TYPE_EXT       0x3339
 #define EGL_COLOR_COMPONENT_TYPE_FIXED_EXT 0x333A
 #define EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT 0x333B
-#endif
+#endif // EGL_EXT_pixel_format_float
+
+#ifndef EGL_EXT_platform_device
+#define EGL_EXT_platform_device 1
+#define EGL_PLATFORM_DEVICE_EXT 0x313F
+#endif // EGL_EXT_platform_device
 
 #ifndef EGL_EXT_present_opaque
 #define EGL_EXT_present_opaque 1
@@ -109,13 +114,6 @@
 
 #if defined(SDL_VIDEO_OPENGL) && !defined(SDL_VIDEO_VITA_PVR_OGL)
 #include <SDL3/SDL_opengl.h>
-#endif
-
-/** If we happen to not have this defined because of an older EGL version, just define it 0x0
-    as eglGetPlatformDisplayEXT will most likely be NULL if this is missing
-*/
-#ifndef EGL_PLATFORM_DEVICE_EXT
-#define EGL_PLATFORM_DEVICE_EXT 0x0
 #endif
 
 #ifdef SDL_VIDEO_OPENGL
@@ -260,7 +258,7 @@ SDL_FunctionPointer SDL_EGL_GetProcAddressInternal(SDL_VideoDevice *_this, const
             result = _this->egl_data->eglGetProcAddress(proc);
         }
 
-#if !defined(SDL_PLATFORM_EMSCRIPTEN) && !defined(SDL_VIDEO_DRIVER_VITA) // LoadFunction isn't needed on Emscripten and will call dlsym(), causing other problems.
+#if !defined(SDL_VIDEO_DRIVER_VITA)
         // Try SDL_LoadFunction() first for EGL <= 1.4, or as a fallback for >= 1.5.
         if (!result) {
             result = SDL_LoadFunction(_this->egl_data->opengl_dll_handle, proc);
@@ -344,7 +342,7 @@ static bool SDL_EGL_LoadLibraryInternal(SDL_VideoDevice *_this, const char *egl_
 
 #if !defined(SDL_VIDEO_STATIC_ANGLE) && !defined(SDL_VIDEO_DRIVER_VITA)
     /* A funny thing, loading EGL.so first does not work on the Raspberry, so we load libGL* first */
-    path = SDL_getenv("SDL_VIDEO_GL_DRIVER");
+    path = SDL_GetHint(SDL_HINT_OPENGL_LIBRARY);
     if (path) {
         opengl_dll_handle = SDL_LoadObject(path);
     }
@@ -404,7 +402,7 @@ static bool SDL_EGL_LoadLibraryInternal(SDL_VideoDevice *_this, const char *egl_
         if (egl_dll_handle) {
             SDL_UnloadObject(egl_dll_handle);
         }
-        path = SDL_getenv("SDL_VIDEO_EGL_DRIVER");
+        path = SDL_GetHint(SDL_HINT_EGL_LIBRARY);
         if (!path) {
             path = DEFAULT_EGL;
         }
@@ -719,7 +717,7 @@ static void dumpconfig(SDL_VideoDevice *_this, EGLConfig config)
     for (attr = 0; attr < sizeof(all_attributes) / sizeof(Attribute); attr++) {
         EGLint value;
         _this->egl_data->eglGetConfigAttrib(_this->egl_data->egl_display, config, all_attributes[attr].attribute, &value);
-        SDL_Log("\t%-32s: %10d (0x%08x)\n", all_attributes[attr].name, value, value);
+        SDL_Log("\t%-32s: %10d (0x%08x)", all_attributes[attr].name, value, value);
     }
 }
 
