@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -27,7 +27,11 @@
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UTType.h>
 
+#ifdef SDL_VIDEO_DRIVER_COCOA
 extern void Cocoa_SetWindowHasModalDialog(SDL_Window *window, bool has_modal);
+#else
+#define Cocoa_SetWindowHasModalDialog(window, has_modal)
+#endif
 
 static void AddFileExtensionType(NSMutableArray *types, const char *pattern_ptr)
 {
@@ -157,8 +161,15 @@ void SDL_SYS_ShowFileDialogWithProperties(SDL_FileDialogType type, SDL_DialogFil
     // Keep behavior consistent with other platforms
     [dialog setAllowsOtherFileTypes:YES];
 
-    if (default_location) {
-        [dialog setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:default_location]]];
+    if (default_location && *default_location) {
+        char last = default_location[SDL_strlen(default_location) - 1];
+        NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:default_location]];
+        if (last == '/') {
+            [dialog setDirectoryURL:url];
+        } else {
+            [dialog setDirectoryURL:[url URLByDeletingLastPathComponent]];
+            [dialog setNameFieldStringValue:[url lastPathComponent]];
+        }
     }
 
     NSWindow *w = NULL;

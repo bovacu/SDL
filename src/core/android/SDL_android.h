@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -62,13 +62,12 @@ void Android_SetAllowRecreateActivity(bool enabled);
 extern void Android_JNI_SetActivityTitle(const char *title);
 extern void Android_JNI_SetWindowStyle(bool fullscreen);
 extern void Android_JNI_SetOrientation(int w, int h, int resizable, const char *hint);
-extern void Android_JNI_MinizeWindow(void);
+extern void Android_JNI_MinimizeWindow(void);
 extern bool Android_JNI_ShouldMinimizeOnFocusLoss(void);
 
 extern bool Android_JNI_GetAccelerometerValues(float values[3]);
 extern void Android_JNI_ShowScreenKeyboard(int input_type, SDL_Rect *inputRect);
 extern void Android_JNI_HideScreenKeyboard(void);
-extern bool Android_JNI_IsScreenKeyboardShown(void);
 extern ANativeWindow *Android_JNI_GetNativeWindow(void);
 
 extern SDL_DisplayOrientation Android_JNI_GetDisplayNaturalOrientation(void);
@@ -106,6 +105,7 @@ int Android_JNI_GetPowerInfo(int *plugged, int *charged, int *battery, int *seco
 
 // Joystick support
 void Android_JNI_PollInputDevices(void);
+void Android_JNI_JoystickSetLED(int device_id, int red, int green, int blue);
 
 // Haptic support
 void Android_JNI_PollHapticDevices(void);
