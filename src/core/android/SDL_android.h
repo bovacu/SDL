@@ -32,6 +32,7 @@ extern "C" {
 
 #include <EGL/eglplatform.h>
 #include <android/native_window_jni.h>
+#include <android/asset_manager_jni.h>
 
 #include "../../audio/SDL_sysaudio.h"
 
@@ -158,6 +159,10 @@ bool SDL_IsAndroidTV(void);
 bool Android_JNI_OpenFileDialog(SDL_DialogFileCallback callback, void *userdata,
     const SDL_DialogFileFilter *filters, int nfilters, bool forwrite,
     bool multiple);
+
+// RDE custom functions
+extern AAssetManager* Android_JNI_GetAssetManager(void);
+extern char *Android_JNI_GetDeviceID(void);
 
 // Ends C function definitions when using C++
 #ifdef __cplusplus

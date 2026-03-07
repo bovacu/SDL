@@ -38,7 +38,6 @@
 
 #include <android/log.h>
 #include <android/configuration.h>
-#include <android/asset_manager_jni.h>
 #include <sys/system_properties.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -2855,6 +2854,35 @@ bool Android_JNI_OpenFileDialog(
     }
 
     return true;
+}
+
+AAssetManager* Android_JNI_GetAssetManager(void)
+{
+    if (!asset_manager) {
+        Internal_Android_Create_AssetManager();
+        if (!asset_manager) {
+            SDL_SetError("Couldn't create asset manager");
+            return NULL;
+        }
+    }
+
+    return asset_manager;
+}
+
+char *Android_JNI_GetDeviceID(void) {
+    char *deviceIdStr = NULL;
+    
+    jclass clazz = (*env)->FindClass(env, "android/os/Build");
+    jfieldID fieldId = (*env)->GetStaticFieldID(env, clazz, "SERIAL", "Ljava/lang/String;");
+    jstring deviceId = (jstring)(*env)->GetStaticObjectField(env, clazz, fieldId);
+    const char *utf  = (*env)->GetStringUTFChars(env, deviceId, 0);
+    
+    if (utf) {
+        deviceIdStr = SDL_strdup(utf);
+        (*env)->ReleaseStringUTFChars(env, string, utf);
+    }
+    
+    return (!deviceIdStr) ? SDL_strdup("") : deviceIdStr;
 }
 
 #endif // SDL_PLATFORM_ANDROID
