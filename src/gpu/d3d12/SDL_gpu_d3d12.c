@@ -9832,6 +9832,14 @@ static SDL_GPUDevice *D3D12_CreateDevice(bool debugMode, bool preferLowPower, SD
     }
 #endif
 
+    /* === RDE PATCH BEGIN: native D3D12 handle exposure ====================== */
+    /* Added by the RDE engine fork — publishes ID3D12Device + ID3D12CommandQueue */
+    /* via the device properties bag for read-only consumer queries.              */
+    /* NOT upstream SDL3.  See SDL_gpu.h "RDE PATCH BEGIN" for the property keys. */
+    SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_D3D12_DEVICE_POINTER,        renderer->device);
+    SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_D3D12_COMMAND_QUEUE_POINTER, renderer->commandQueue);
+    /* === RDE PATCH END ====================================================== */
+
     // Create indirect command signatures
 
     D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc;

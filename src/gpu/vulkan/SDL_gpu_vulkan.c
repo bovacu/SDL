@@ -68,6 +68,13 @@ typedef struct VulkanExtensions
     Uint8 MSFT_layered_driver;
     // Only required for decoding HDR ASTC textures
     Uint8 EXT_texture_compression_astc_hdr;
+    /* === RDE PATCH BEGIN: VK_EXT_memory_budget opt-in for VRAM stats ====== */
+    /* Added by the RDE engine fork.  Enables VkPhysicalDeviceMemoryBudget-   */
+    /* PropertiesEXT so rde_metrics can chain it into vkGetPhysicalDevice-    */
+    /* MemoryProperties2 and read per-heap used + budget bytes.               */
+    /* NOT upstream SDL3.  See further RDE PATCH blocks below + SDL_gpu.h.    */
+    Uint8 EXT_memory_budget;
+    /* === RDE PATCH END ==================================================== */
 } VulkanExtensions;
 
 // Defines
@@ -11098,7 +11105,8 @@ static inline Uint8 CheckDeviceExtensions(
         supports->ext = 1;                   \
     }
         CHECK(KHR_swapchain)
-        else CHECK(KHR_maintenance1) else CHECK(KHR_driver_properties) else CHECK(KHR_portability_subset) else CHECK(MSFT_layered_driver) else CHECK(EXT_texture_compression_astc_hdr)
+        /* === RDE PATCH: appended EXT_memory_budget detection (non-upstream) === */
+        else CHECK(KHR_maintenance1) else CHECK(KHR_driver_properties) else CHECK(KHR_portability_subset) else CHECK(MSFT_layered_driver) else CHECK(EXT_texture_compression_astc_hdr) else CHECK(EXT_memory_budget)
 #undef CHECK
     }
 
@@ -11114,7 +11122,8 @@ static inline Uint32 GetDeviceExtensionCount(VulkanExtensions *supports)
         supports->KHR_driver_properties +
         supports->KHR_portability_subset +
         supports->MSFT_layered_driver +
-        supports->EXT_texture_compression_astc_hdr);
+        supports->EXT_texture_compression_astc_hdr +
+        supports->EXT_memory_budget); /* RDE PATCH: appended (non-upstream) */
 }
 
 static inline void CreateDeviceExtensionArray(
@@ -11132,6 +11141,7 @@ static inline void CreateDeviceExtensionArray(
     CHECK(KHR_portability_subset)
     CHECK(MSFT_layered_driver)
     CHECK(EXT_texture_compression_astc_hdr)
+    CHECK(EXT_memory_budget) /* RDE PATCH: appended (non-upstream) */
 #undef CHECK
 }
 
@@ -13244,6 +13254,20 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
     if (verboseLogs) {
         SDL_LogInfo(SDL_LOG_CATEGORY_GPU, "SDL_GPU Driver: Vulkan");
     }
+
+    /* === RDE PATCH BEGIN: native Vulkan handle exposure =================== */
+    /* Added by the RDE engine fork — publishes the VkInstance, VkPhysical-   */
+    /* Device, VkDevice, VkQueue, queue family index, and EXT_memory_budget   */
+    /* availability via the device properties bag, for read-only consumer    */
+    /* queries (rde_metrics VRAM, vendor extensions).                         */
+    /* NOT upstream SDL3.  See SDL_gpu.h "RDE PATCH BEGIN" for property keys. */
+    SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_VULKAN_INSTANCE_POINTER,           (void *)renderer->instance);
+    SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_VULKAN_PHYSICAL_DEVICE_POINTER,    (void *)renderer->physicalDevice);
+    SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_VULKAN_DEVICE_POINTER,             (void *)renderer->logicalDevice);
+    SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_VULKAN_QUEUE_POINTER,              (void *)renderer->unifiedQueue);
+    SDL_SetNumberProperty (renderer->props, SDL_PROP_GPU_DEVICE_VULKAN_QUEUE_FAMILY_INDEX_NUMBER,  (Sint64)renderer->queueFamilyIndex);
+    SDL_SetBooleanProperty(renderer->props, SDL_PROP_GPU_DEVICE_VULKAN_EXT_MEMORY_BUDGET_BOOLEAN,  renderer->supports.EXT_memory_budget != 0);
+    /* === RDE PATCH END ==================================================== */
 
     // Record device name
     const char *deviceName = renderer->physicalDeviceProperties.properties.deviceName;

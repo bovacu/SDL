@@ -4628,6 +4628,16 @@ static SDL_GPUDevice *METAL_CreateDevice(bool debugMode, bool preferLowPower, SD
             SDL_LogInfo(SDL_LOG_CATEGORY_GPU, "SDL_GPU Driver: Metal");
         }
 
+        /* === RDE PATCH BEGIN: native Metal handle exposure =================== */
+        /* Added by the RDE engine fork — publishes id<MTLDevice> and             */
+        /* id<MTLCommandQueue> via the device properties bag for read-only        */
+        /* consumer queries (currentAllocatedSize for VRAM, etc).  __bridge       */
+        /* keeps the references zero-cost — SDL still owns them.                  */
+        /* NOT upstream SDL3.  See SDL_gpu.h "RDE PATCH BEGIN" for property keys. */
+        SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_METAL_DEVICE_POINTER,        (__bridge void *)renderer->device);
+        SDL_SetPointerProperty(renderer->props, SDL_PROP_GPU_DEVICE_METAL_COMMAND_QUEUE_POINTER, (__bridge void *)renderer->queue);
+        /* === RDE PATCH END ==================================================== */
+
         // Record device name
         const char *deviceName = [device.name UTF8String];
         SDL_SetStringProperty(
