@@ -2597,6 +2597,57 @@ extern SDL_DECLSPEC SDL_PropertiesID SDLCALL SDL_GetGPUDeviceProperties(SDL_GPUD
 #define SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING     "SDL.gpu.device.driver_version"
 #define SDL_PROP_GPU_DEVICE_DRIVER_INFO_STRING        "SDL.gpu.device.driver_info"
 
+/* ========================================================================== */
+/* === RDE PATCH BEGIN: native backend handle properties ==================== */
+/* ========================================================================== */
+/* Added by the RDE engine fork to expose native D3D12 / Vulkan / Metal       */
+/* device-level handles via SDL_GetGPUDeviceProperties.  Used by rde_metrics  */
+/* for VRAM queries (VK_EXT_memory_budget, MTLDevice.currentAllocatedSize)    */
+/* and other read-only native-API integrations.  NOT upstream SDL3.           */
+/* See also: SDL_gpu_d3d12.c, SDL_gpu_vulkan.c, SDL_gpu_metal.m (matching     */
+/* RDE PATCH BEGIN/END blocks).                                               */
+/**
+ * Native backend handles published by SDL_GetGPUDeviceProperties.
+ *
+ * Each backend only sets the properties relevant to it; all others are absent
+ * from the properties bag. These are intended for low-level integration:
+ * native-API queries (VK_EXT_memory_budget, NVAPI, MTLDevice.currentAllocatedSize)
+ * and for engines that want to interop with their own native code paths.
+ *
+ * The pointers reference SDL-owned resources and remain valid for the lifetime
+ * of the SDL_GPUDevice. Do not release/destroy them. Do not call methods that
+ * change device state (resource creation/destruction, queue submission) unless
+ * you understand SDL's own synchronization model — the safe operations are
+ * read-only queries (GetTimestampFrequency, vkGetPhysicalDeviceMemoryProperties2,
+ * MTLDevice.currentAllocatedSize, etc).
+ *
+ * D3D12:
+ *   SDL_PROP_GPU_DEVICE_D3D12_DEVICE_POINTER          → ID3D12Device*
+ *   SDL_PROP_GPU_DEVICE_D3D12_COMMAND_QUEUE_POINTER   → ID3D12CommandQueue*
+ *
+ * Vulkan:
+ *   SDL_PROP_GPU_DEVICE_VULKAN_INSTANCE_POINTER          → VkInstance
+ *   SDL_PROP_GPU_DEVICE_VULKAN_PHYSICAL_DEVICE_POINTER   → VkPhysicalDevice
+ *   SDL_PROP_GPU_DEVICE_VULKAN_DEVICE_POINTER            → VkDevice (logical)
+ *   SDL_PROP_GPU_DEVICE_VULKAN_QUEUE_POINTER             → VkQueue (unified graphics+compute)
+ *   SDL_PROP_GPU_DEVICE_VULKAN_QUEUE_FAMILY_INDEX_NUMBER → Uint32 family index
+ *
+ * Metal:
+ *   SDL_PROP_GPU_DEVICE_METAL_DEVICE_POINTER          → id<MTLDevice>
+ *   SDL_PROP_GPU_DEVICE_METAL_COMMAND_QUEUE_POINTER   → id<MTLCommandQueue>
+ */
+#define SDL_PROP_GPU_DEVICE_D3D12_DEVICE_POINTER             "SDL.gpu.device.d3d12.device"
+#define SDL_PROP_GPU_DEVICE_D3D12_COMMAND_QUEUE_POINTER      "SDL.gpu.device.d3d12.command_queue"
+#define SDL_PROP_GPU_DEVICE_VULKAN_INSTANCE_POINTER          "SDL.gpu.device.vulkan.instance"
+#define SDL_PROP_GPU_DEVICE_VULKAN_PHYSICAL_DEVICE_POINTER   "SDL.gpu.device.vulkan.physical_device"
+#define SDL_PROP_GPU_DEVICE_VULKAN_DEVICE_POINTER            "SDL.gpu.device.vulkan.device"
+#define SDL_PROP_GPU_DEVICE_VULKAN_QUEUE_POINTER             "SDL.gpu.device.vulkan.queue"
+#define SDL_PROP_GPU_DEVICE_VULKAN_QUEUE_FAMILY_INDEX_NUMBER "SDL.gpu.device.vulkan.queue_family_index"
+#define SDL_PROP_GPU_DEVICE_VULKAN_EXT_MEMORY_BUDGET_BOOLEAN "SDL.gpu.device.vulkan.ext_memory_budget"
+#define SDL_PROP_GPU_DEVICE_METAL_DEVICE_POINTER             "SDL.gpu.device.metal.device"
+#define SDL_PROP_GPU_DEVICE_METAL_COMMAND_QUEUE_POINTER      "SDL.gpu.device.metal.command_queue"
+/* === RDE PATCH END ======================================================== */
+
 
 /* State Creation */
 
