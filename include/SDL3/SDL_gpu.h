@@ -1805,6 +1805,7 @@ typedef struct SDL_GPUBufferCreateInfo
  *
  * \since This struct is available since SDL 3.2.0.
  *
+ * \sa SDL_GPUTransferBufferUsage
  * \sa SDL_CreateGPUTransferBuffer
  */
 typedef struct SDL_GPUTransferBufferCreateInfo
@@ -1872,6 +1873,7 @@ typedef struct SDL_GPUMultisampleState
  * \since This struct is available since SDL 3.2.0.
  *
  * \sa SDL_GPUGraphicsPipelineCreateInfo
+ * \sa SDL_GPUStencilOpState
  */
 typedef struct SDL_GPUDepthStencilState
 {

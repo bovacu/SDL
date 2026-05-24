@@ -177,7 +177,6 @@ void *SDL_AndroidGetNativeWindow(void)
     return NULL;
 }
 
-SDL_DECLSPEC int SDLCALL SDL_GetAndroidSDKVersion(void);
 int SDL_GetAndroidSDKVersion(void)
 {
     return SDL_Unsupported();

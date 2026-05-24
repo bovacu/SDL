@@ -52,6 +52,8 @@
 #include <string.h>
 #include <wchar.h>
 
+#include <SDL3/SDL_begin_code.h>
+
 /* Most everything except Visual Studio 2008 and earlier has stdint.h now */
 #if defined(_MSC_VER) && (_MSC_VER < 1600)
 typedef signed __int8 int8_t;
@@ -237,6 +239,8 @@ void *alloca(size_t);
        typedef int SDL_compile_time_assert_ ## name[(x) * 2 - 1]
 #endif
 
+#ifdef SDL_WIKI_DOCUMENTATION_SECTION
+
 /**
  * The number of elements in a static array.
  *
@@ -249,7 +253,15 @@ void *alloca(size_t);
  *
  * \since This macro is available since SDL 3.2.0.
  */
+#define SDL_arraysize(array) (sizeof(array)/sizeof(array[0]))  /* or `_Countof(array)` on recent gcc and clang */
+
+#else
+#if !defined(__cplusplus) && ((defined(__GNUC__) && __GNUC__ >= 16) || SDL_HAS_EXTENSION(c_countof))
+#define SDL_arraysize(array) _Countof(array)
+#else
 #define SDL_arraysize(array) (sizeof(array)/sizeof(array[0]))
+#endif
+#endif
 
 /**
  * Macro useful for building other macros with strings in them.
@@ -727,7 +739,7 @@ typedef Sint64 SDL_Time;
  * <inttypes.h> should define these but this is not true all platforms.
  * (for example win32) */
 #ifndef SDL_PRIs64
-#if defined(SDL_PLATFORM_WINDOWS)
+#if defined(SDL_PLATFORM_WINDOWS) && !defined(SDL_PLATFORM_CYGWIN)
 #define SDL_PRIs64 "I64d"
 #elif defined(PRId64)
 #define SDL_PRIs64 PRId64
@@ -738,7 +750,7 @@ typedef Sint64 SDL_Time;
 #endif
 #endif
 #ifndef SDL_PRIu64
-#if defined(SDL_PLATFORM_WINDOWS)
+#if defined(SDL_PLATFORM_WINDOWS) && !defined(SDL_PLATFORM_CYGWIN)
 #define SDL_PRIu64 "I64u"
 #elif defined(PRIu64)
 #define SDL_PRIu64 PRIu64
@@ -749,7 +761,7 @@ typedef Sint64 SDL_Time;
 #endif
 #endif
 #ifndef SDL_PRIx64
-#if defined(SDL_PLATFORM_WINDOWS)
+#if defined(SDL_PLATFORM_WINDOWS) && !defined(SDL_PLATFORM_CYGWIN)
 #define SDL_PRIx64 "I64x"
 #elif defined(PRIx64)
 #define SDL_PRIx64 PRIx64
@@ -760,7 +772,7 @@ typedef Sint64 SDL_Time;
 #endif
 #endif
 #ifndef SDL_PRIX64
-#if defined(SDL_PLATFORM_WINDOWS)
+#if defined(SDL_PLATFORM_WINDOWS) && !defined(SDL_PLATFORM_CYGWIN)
 #define SDL_PRIX64 "I64X"
 #elif defined(PRIX64)
 #define SDL_PRIX64 PRIX64
@@ -799,7 +811,7 @@ typedef Sint64 SDL_Time;
 #endif
 #endif
 /* Specifically for the `long long` -- SDL-specific. */
-#ifdef SDL_PLATFORM_WINDOWS
+#if defined(SDL_PLATFORM_WINDOWS) && !defined(SDL_PLATFORM_CYGWIN)
 #ifndef SDL_NOLONGLONG
 SDL_COMPILE_TIME_ASSERT(longlong_size64, sizeof(long long) == 8); /* using I64 for windows - make sure `long long` is 64 bits. */
 #endif
@@ -1209,7 +1221,6 @@ SDL_COMPILE_TIME_ASSERT(enum, sizeof(SDL_DUMMY_ENUM) == sizeof(int));
 #endif /* DOXYGEN_SHOULD_IGNORE_THIS */
 /** \endcond */
 
-#include <SDL3/SDL_begin_code.h>
 /* Set up for C function definitions, even when using C++ */
 #ifdef __cplusplus
 extern "C" {
@@ -1728,7 +1739,7 @@ extern SDL_DECLSPEC const char * SDLCALL SDL_GetEnvironmentVariable(SDL_Environm
  *
  * \sa SDL_GetEnvironment
  * \sa SDL_CreateEnvironment
- * \sa SDL_GetEnvironmentVariables
+ * \sa SDL_GetEnvironmentVariable
  * \sa SDL_SetEnvironmentVariable
  * \sa SDL_UnsetEnvironmentVariable
  */
@@ -3023,7 +3034,7 @@ extern SDL_DECLSPEC long SDLCALL SDL_wcstol(const wchar_t *str, wchar_t **endp, 
  * If you need the length of a UTF-8 string, consider using SDL_utf8strlen().
  *
  * \param str The null-terminated string to read. Must not be NULL.
- * \returns the length (in bytes, excluding the null terminator) of `src`.
+ * \returns the length (in bytes, excluding the null terminator) of `str`.
  *
  * \threadsafety It is safe to call this function from any thread.
  *
@@ -3212,7 +3223,7 @@ extern SDL_DECLSPEC char * SDLCALL SDL_strrev(char *str);
  * Convert a string to uppercase.
  *
  * **WARNING**: Regardless of system locale, this will only convert ASCII
- * values 'A' through 'Z' to uppercase.
+ * values 'a' through 'z' to uppercase.
  *
  * This function operates on a null-terminated string of bytes--even if it is
  * malformed UTF-8!--and converts ASCII characters 'a' through 'z' to their
@@ -3996,7 +4007,7 @@ extern SDL_DECLSPEC char * SDLCALL SDL_strpbrk(const char *str, const char *brea
  * NULL-terminated, as the function will blindly read until it sees the NULL
  * char.
  *
- * if `*pslen` is zero, it assumes the end of string is reached and returns a
+ * If `*pslen` is zero, it assumes the end of string is reached and returns a
  * zero codepoint regardless of the contents of the string buffer.
  *
  * If the resulting codepoint is zero (a NULL terminator), or `*pslen` is
@@ -4417,9 +4428,6 @@ extern SDL_DECLSPEC Sint32 SDLCALL SDL_rand_r(Uint64 *state, Sint32 n);
 
 /**
  * Generate a uniform pseudo-random floating point number less than 1.0
- *
- * If you want reproducible output, be sure to initialize with SDL_srand()
- * first.
  *
  * There are no guarantees as to the quality of the random sequence produced,
  * and this should not be used for security (cryptography, passwords) or where
