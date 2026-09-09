@@ -19,6 +19,7 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+<<<<<<<< HEAD:src/gpu/xr/SDL_gpu_openxr.h
 #include "SDL_openxrdyn.h"
 
 XrResult SDL_OPENXR_INTERNAL_GPUInitOpenXR(
@@ -28,3 +29,12 @@ XrResult SDL_OPENXR_INTERNAL_GPUInitOpenXR(
     XrInstance *instance,
     XrSystemId *systemId,
     XrInstancePfns **xr);
+========
+#ifndef SDL_zenitymessagebox_h_
+#define SDL_zenitymessagebox_h_
+
+extern bool SDL_Zenity_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonID);
+extern bool SDL_get_zenity_version(int *major, int *minor);
+
+#endif // SDL_zenitymessagebox_h_
+>>>>>>>> main_sync:src/dialog/unix/SDL_zenitymessagebox.h

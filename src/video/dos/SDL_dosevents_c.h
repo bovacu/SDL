@@ -19,14 +19,14 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
-<<<<<<<< HEAD:src/dialog/unix/SDL_zenitymessagebox.h
-#ifndef SDL_zenitymessagebox_h_
-#define SDL_zenitymessagebox_h_
+<<<<<<<< HEAD:src/thread/dos/SDL_systhread_c.h
+#ifndef SDL_systhread_c_h_
+#define SDL_systhread_c_h_
 
-extern bool SDL_Zenity_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonID);
-extern bool SDL_get_zenity_version(int *major, int *minor);
+/* DOS thread handle is an integer thread ID from the DOS scheduler */
+typedef int SYS_ThreadHandle;
 
-#endif // SDL_zenitymessagebox_h_
+#endif /* SDL_systhread_c_h_ */
 ========
 #ifndef SDL_dosevents_c_h_
 #define SDL_dosevents_c_h_

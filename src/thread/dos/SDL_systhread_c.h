@@ -19,6 +19,7 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+<<<<<<<< HEAD:src/thread/dos/SDL_systhread_c.h
 #ifndef SDL_systhread_c_h_
 #define SDL_systhread_c_h_
 
@@ -26,3 +27,15 @@
 typedef int SYS_ThreadHandle;
 
 #endif /* SDL_systhread_c_h_ */
+========
+#ifndef SDL_dosevents_c_h_
+#define SDL_dosevents_c_h_
+
+#include "SDL_dosvideo.h"
+
+void DOSVESA_PumpEvents(SDL_VideoDevice *device);
+void DOSVESA_InitKeyboard(SDL_VideoDevice *device);
+void DOSVESA_QuitKeyboard(SDL_VideoDevice *device);
+
+#endif // SDL_dosevents_c_h_
+>>>>>>>> main_sync:src/video/dos/SDL_dosevents_c.h
