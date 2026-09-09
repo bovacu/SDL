@@ -500,6 +500,7 @@ char *SDL_CreateDeviceName(Uint16 vendor, Uint16 product, const char *vendor_nam
         { "Performance Designed Products", "PDP" },
         { "QANBA USA, LLC", "Qanba" },
         { "QANBA USA,LLC", "Qanba" },
+        { "Voyetra Turtle Beach,Inc.", "Turtle Beach" },
         { "Unknown ", "" },
     };
     char *name = NULL;
@@ -625,4 +626,3 @@ void SDL_DebugLogBackend(const char *subsystem, const char *backend)
 {
     SDL_LogDebug(SDL_LOG_CATEGORY_SYSTEM, "SDL chose %s backend '%s'", subsystem, backend);
 }
-

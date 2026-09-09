@@ -114,19 +114,14 @@ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
 #endif
 };
 
-#ifndef SDL_THREAD_SAFETY_ANALYSIS
-static
-#endif
-SDL_Mutex *SDL_joystick_lock = NULL; // This needs to support recursive locks
-static SDL_AtomicInt SDL_joystick_lock_pending;
 static int SDL_joysticks_locked;
 static bool SDL_joysticks_initialized;
 static bool SDL_joysticks_quitting;
 static bool SDL_joystick_being_added;
-static SDL_Joystick *SDL_joysticks SDL_GUARDED_BY(SDL_joystick_lock) = NULL;
-static int SDL_joystick_player_count SDL_GUARDED_BY(SDL_joystick_lock) = 0;
-static SDL_JoystickID *SDL_joystick_players SDL_GUARDED_BY(SDL_joystick_lock) = NULL;
-static SDL_HashTable *SDL_joystick_names SDL_GUARDED_BY(SDL_joystick_lock) = NULL;
+static SDL_Joystick *SDL_joysticks SDL_GUARDED_BY(SDL_event_lock) = NULL;
+static int SDL_joystick_player_count SDL_GUARDED_BY(SDL_event_lock) = 0;
+static SDL_JoystickID *SDL_joystick_players SDL_GUARDED_BY(SDL_event_lock) = NULL;
+static SDL_HashTable *SDL_joystick_names SDL_GUARDED_BY(SDL_event_lock) = NULL;
 static bool SDL_joystick_allows_background_events = false;
 
 static Uint32 initial_old_xboxone_controllers[] = {
@@ -482,6 +477,7 @@ static Uint32 initial_flightstick_devices[] = {
     MAKE_VIDPID(0x10f5, 0x7084), // Turtle Beach VelocityOne
     MAKE_VIDPID(0x231d, 0x0126), // Gunfighter Mk.III 'Space Combat Edition' (right)
     MAKE_VIDPID(0x231d, 0x0127), // Gunfighter Mk.III 'Space Combat Edition' (left)
+    MAKE_VIDPID(0x231d, 0x0200), // VKB Gladiator NXT Evo (grip)
     MAKE_VIDPID(0x3344, 0x4391), // VIRPIL Controls R-VPC Stick MT-50CM3
     MAKE_VIDPID(0x3344, 0x8390), // VIRPIL Controls L-VPC Stick MT-50CM3
     MAKE_VIDPID(0x362c, 0x0001), // Yawman Arrow
@@ -499,6 +495,7 @@ static Uint32 initial_gamecube_devices[] = {
     MAKE_VIDPID(0x0079, 0x1846), // DragonRise GameCube Controller Adapter
     MAKE_VIDPID(0x057e, 0x0337), // Nintendo Wii U GameCube Controller Adapter
     MAKE_VIDPID(0x057e, 0x2073), // Nintendo Switch 2 NSO GameCube Controller
+    MAKE_VIDPID(0x05e3, 0x0681), // Austgame GameCube to USB convertor
     MAKE_VIDPID(0x0926, 0x8888), // Cyber Gadget GameCube Controller
     MAKE_VIDPID(0x0e6f, 0x0185), // PDP Wired Fight Pad Pro for Nintendo Switch
     MAKE_VIDPID(0x1a34, 0xf705), // GameCube {HuiJia USB box}
@@ -706,16 +703,13 @@ bool SDL_JoysticksQuitting(void)
 
 void SDL_LockJoysticks(void)
 {
-    (void)SDL_AtomicIncRef(&SDL_joystick_lock_pending);
-    SDL_LockMutex(SDL_joystick_lock);
-    (void)SDL_AtomicDecRef(&SDL_joystick_lock_pending);
-
+    SDL_LockMutex(SDL_event_lock);
     ++SDL_joysticks_locked;
 }
 
 bool SDL_TryLockJoysticks(void)
 {
-    if (SDL_TryLockMutex(SDL_joystick_lock)) {
+    if (SDL_TryLockMutex(SDL_event_lock)) {
         ++SDL_joysticks_locked;
         return true;
     }
@@ -724,34 +718,8 @@ bool SDL_TryLockJoysticks(void)
 
 void SDL_UnlockJoysticks(void)
 {
-    bool last_unlock = false;
-
     --SDL_joysticks_locked;
-
-    if (!SDL_joysticks_initialized) {
-        // NOTE: There's a small window here where another thread could lock the mutex after we've checked for pending locks
-        if (!SDL_joysticks_locked && SDL_GetAtomicInt(&SDL_joystick_lock_pending) == 0) {
-            last_unlock = true;
-        }
-    }
-
-    /* The last unlock after joysticks are uninitialized will cleanup the mutex,
-     * allowing applications to lock joysticks while reinitializing the system.
-     */
-    if (last_unlock) {
-        SDL_Mutex *joystick_lock = SDL_joystick_lock;
-
-        SDL_LockMutex(joystick_lock);
-        {
-            SDL_UnlockMutex(SDL_joystick_lock);
-
-            SDL_joystick_lock = NULL;
-        }
-        SDL_UnlockMutex(joystick_lock);
-        SDL_DestroyMutex(joystick_lock);
-    } else {
-        SDL_UnlockMutex(SDL_joystick_lock);
-    }
+    SDL_UnlockMutex(SDL_event_lock);
 }
 
 bool SDL_JoysticksLocked(void)
@@ -891,11 +859,6 @@ bool SDL_InitJoysticks(void)
 {
     int i;
     bool result = false;
-
-    // Create the joystick list lock
-    if (SDL_joystick_lock == NULL) {
-        SDL_joystick_lock = SDL_CreateMutex();
-    }
 
     if (!SDL_InitSubSystem(SDL_INIT_EVENTS)) {
         return false;
@@ -1926,6 +1889,177 @@ bool SDL_GetJoystickButton(SDL_Joystick *joystick, int button)
     return down;
 }
 
+static bool ErrorNoSuchSensor(void)
+{
+    return SDL_SetError("No such sensor on this device");
+}
+
+/**
+ *  Return whether a joystick has a particular sensor.
+ */
+bool SDL_JoystickHasSensor(SDL_Joystick *joystick, SDL_SensorType type)
+{
+    bool result = false;
+
+    SDL_LockJoysticks();
+    {
+        CHECK_JOYSTICK_MAGIC(joystick, false);
+        for (int i = 0; i < joystick->nsensors; ++i) {
+            if (joystick->sensors[i].type == type) {
+                result = true;
+                break;
+            }
+        }
+    }
+    SDL_UnlockJoysticks();
+
+    return result;
+}
+
+/*
+ *  Set whether data reporting for a joystick sensor is enabled
+ */
+bool SDL_SetJoystickSensorEnabled(SDL_Joystick *joystick, SDL_SensorType type, bool enabled)
+{
+    SDL_LockJoysticks();
+    {
+        CHECK_JOYSTICK_MAGIC(joystick, false);
+        for (int i = 0; i < joystick->nsensors; ++i) {
+            SDL_JoystickSensorInfo *sensor = &joystick->sensors[i];
+
+            if (sensor->type == type) {
+                if (sensor->enabled == (enabled != false)) {
+                    SDL_UnlockJoysticks();
+                    return true;
+                }
+
+                if (type == SDL_SENSOR_ACCEL && joystick->accel_sensor) {
+                    if (enabled) {
+                        joystick->accel = SDL_OpenSensor(joystick->accel_sensor);
+                        if (!joystick->accel) {
+                            SDL_UnlockJoysticks();
+                            return false;
+                        }
+                    } else {
+                        if (joystick->accel) {
+                            SDL_CloseSensor(joystick->accel);
+                            joystick->accel = NULL;
+                        }
+                    }
+                } else if (type == SDL_SENSOR_GYRO && joystick->gyro_sensor) {
+                    if (enabled) {
+                        joystick->gyro = SDL_OpenSensor(joystick->gyro_sensor);
+                        if (!joystick->gyro) {
+                            SDL_UnlockJoysticks();
+                            return false;
+                        }
+                    } else {
+                        if (joystick->gyro) {
+                            SDL_CloseSensor(joystick->gyro);
+                            joystick->gyro = NULL;
+                        }
+                    }
+                } else {
+                    if (enabled) {
+                        if (joystick->nsensors_enabled == 0) {
+                            if (!joystick->driver->SetSensorsEnabled(joystick, true)) {
+                                SDL_UnlockJoysticks();
+                                return false;
+                            }
+                        }
+                        ++joystick->nsensors_enabled;
+                    } else {
+                        if (joystick->nsensors_enabled == 1) {
+                            if (!joystick->driver->SetSensorsEnabled(joystick, false)) {
+                                SDL_UnlockJoysticks();
+                                return false;
+                            }
+                        }
+                        --joystick->nsensors_enabled;
+                    }
+                }
+
+                sensor->enabled = enabled;
+                SDL_UnlockJoysticks();
+                return true;
+            }
+        }
+    }
+    SDL_UnlockJoysticks();
+
+    return ErrorNoSuchSensor();
+}
+
+/*
+ *  Query whether sensor data reporting is enabled for a joystick
+ */
+bool SDL_JoystickSensorEnabled(SDL_Joystick *joystick, SDL_SensorType type)
+{
+    bool result = false;
+
+    SDL_LockJoysticks();
+    {
+        CHECK_JOYSTICK_MAGIC(joystick, false);
+        for (int i = 0; i < joystick->nsensors; ++i) {
+            if (joystick->sensors[i].type == type) {
+                result = joystick->sensors[i].enabled;
+                break;
+            }
+        }
+    }
+    SDL_UnlockJoysticks();
+
+    return result;
+}
+
+/*
+ *  Get the data rate of a joystick sensor.
+ */
+float SDL_GetJoystickSensorDataRate(SDL_Joystick *joystick, SDL_SensorType type)
+{
+    float result = 0.0f;
+
+    SDL_LockJoysticks();
+    {
+        CHECK_JOYSTICK_MAGIC(joystick, 0.0f);
+        for (int i = 0; i < joystick->nsensors; ++i) {
+            SDL_JoystickSensorInfo *sensor = &joystick->sensors[i];
+
+            if (sensor->type == type) {
+                result = sensor->rate;
+                break;
+            }
+        }
+    }
+    SDL_UnlockJoysticks();
+
+    return result;
+}
+
+/*
+ *  Get the current state of a joystick sensor.
+ */
+bool SDL_GetJoystickSensorData(SDL_Joystick *joystick, SDL_SensorType type, float *data, int num_values)
+{
+    SDL_LockJoysticks();
+    {
+        CHECK_JOYSTICK_MAGIC(joystick, false);
+        for (int i = 0; i < joystick->nsensors; ++i) {
+            SDL_JoystickSensorInfo *sensor = &joystick->sensors[i];
+
+            if (sensor->type == type) {
+                num_values = SDL_min(num_values, SDL_arraysize(sensor->data));
+                SDL_memcpy(data, sensor->data, num_values * sizeof(*data));
+                SDL_UnlockJoysticks();
+                return true;
+            }
+        }
+    }
+    SDL_UnlockJoysticks();
+
+    return ErrorNoSuchSensor();
+}
+
 /*
  * Return if the joystick in question is currently attached to the system,
  *  \return false if not plugged in, true if still present.
@@ -2297,6 +2431,7 @@ void SDL_CloseJoystick(SDL_Joystick *joystick)
         }
         SDL_free(joystick->touchpads);
         SDL_free(joystick->sensors);
+        SDL_free(joystick->capsenses);
         SDL_free(joystick);
     }
     SDL_UnlockJoysticks();
@@ -3125,6 +3260,8 @@ SDL_GamepadType SDL_GetGamepadTypeFromVIDPID(Uint16 vendor, Uint16 product, cons
     } else if (vendor == USB_VENDOR_NINTENDO && product == USB_PRODUCT_NINTENDO_SWITCH_JOYCON_GRIP) {
         if (name && SDL_strstr(name, "(L)") != NULL) {
             type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT;
+        } else if (name && SDL_strstr(name, "L+R") != NULL) {
+            type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
         } else {
             type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT;
         }
@@ -3166,13 +3303,14 @@ SDL_GamepadType SDL_GetGamepadTypeFromVIDPID(Uint16 vendor, Uint16 product, cons
         case k_eControllerType_SwitchProController:
         case k_eControllerType_Switch2ProController:
         case k_eControllerType_SwitchInputOnlyController:
+        case k_eControllerType_Switch2InputOnlyController:
             type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO;
             break;
         case k_eControllerType_XInputSwitchController:
             if (forUI) {
                 type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO;
             } else {
-                type = SDL_GAMEPAD_TYPE_STANDARD;
+                type = SDL_GAMEPAD_TYPE_XBOX360;
             }
             break;
         case k_eControllerType_SteamController:
@@ -3290,14 +3428,26 @@ bool SDL_IsJoystickNintendoSwitchPro(Uint16 vendor_id, Uint16 product_id)
 {
     EControllerType eType = GuessControllerType(vendor_id, product_id);
     return eType == k_eControllerType_SwitchProController ||
-           eType == k_eControllerType_Switch2ProController ||
            eType == k_eControllerType_SwitchInputOnlyController;
+}
+
+bool SDL_IsJoystickNintendoSwitch2Pro(Uint16 vendor_id, Uint16 product_id)
+{
+    EControllerType eType = GuessControllerType(vendor_id, product_id);
+    return eType == k_eControllerType_Switch2ProController ||
+           eType == k_eControllerType_Switch2InputOnlyController;
 }
 
 bool SDL_IsJoystickNintendoSwitchProInputOnly(Uint16 vendor_id, Uint16 product_id)
 {
     EControllerType eType = GuessControllerType(vendor_id, product_id);
     return eType == k_eControllerType_SwitchInputOnlyController;
+}
+
+bool SDL_IsJoystickNintendoSwitch2ProInputOnly(Uint16 vendor_id, Uint16 product_id)
+{
+    EControllerType eType = GuessControllerType(vendor_id, product_id);
+    return eType == k_eControllerType_Switch2InputOnlyController;
 }
 
 bool SDL_IsJoystickNintendoSwitchJoyCon(Uint16 vendor_id, Uint16 product_id)
@@ -3385,6 +3535,11 @@ bool SDL_IsJoystickSInputController(Uint16 vendor_id, Uint16 product_id)
             return true;
         }
     }
+    if (vendor_id == USB_VENDOR_ANDGAMER) {
+        if (product_id == USB_PRODUCT_VOIDGAMING_GENESIS_SINPUT) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -3409,7 +3564,8 @@ bool SDL_IsJoystickGameSirController(Uint16 vendor_id, Uint16 product_id)
         return false;
     }
 
-    return (product_id == USB_PRODUCT_GAMESIR_GAMEPAD_G7_PRO_8K);
+    return (product_id == USB_PRODUCT_GAMESIR_GAMEPAD_G7_PRO_8K ||
+            product_id == USB_PRODUCT_GAMESIR_GAMEPAD_TARANTULA_8K);
 }
 
 bool SDL_IsJoystickSteamDeck(Uint16 vendor_id, Uint16 product_id)

@@ -153,7 +153,7 @@ static SDL_VideoDevice *X11_CreateDevice(void)
     /* Steam Deck will have an on-screen keyboard, so check their environment
      * variable so we can make use of SDL_StartTextInput.
      */
-    data->is_steam_deck = SDL_GetHintBoolean("SteamDeck", false);
+    data->use_steam_screen_keyboard = SDL_GetHintBoolean(SDL_HINT_ENABLE_STEAM_SCREEN_KEYBOARD, false);
 
     // Set the function pointers
     device->VideoInit = X11_VideoInit;
@@ -238,6 +238,7 @@ static SDL_VideoDevice *X11_CreateDevice(void)
         device->GL_SwapWindow = X11_GLES_SwapWindow;
         device->GL_DestroyContext = X11_GLES_DestroyContext;
         device->GL_GetEGLSurface = X11_GLES_GetEGLSurface;
+        device->GL_SetDefaultProfileConfig = X11_GLES_SetDefaultProfileConfig;
 #ifdef SDL_VIDEO_OPENGL_GLX
     }
 #endif
@@ -382,7 +383,6 @@ static bool X11_VideoInit(SDL_VideoDevice *_this)
 #define GET_ATOM(X) data->atoms.X = X11_XInternAtom(data->display, #X, False)
     GET_ATOM(WM_PROTOCOLS);
     GET_ATOM(WM_DELETE_WINDOW);
-    GET_ATOM(WM_TAKE_FOCUS);
     GET_ATOM(WM_NAME);
     GET_ATOM(WM_TRANSIENT_FOR);
     GET_ATOM(WM_STATE);
@@ -488,12 +488,6 @@ void X11_VideoQuit(SDL_VideoDevice *_this)
     if (data->xsettings_window) {
         X11_XDestroyWindow(data->display, data->xsettings_window);
     }
-
-#ifdef X_HAVE_UTF8_STRING
-    if (data->im) {
-        X11_XCloseIM(data->im);
-    }
-#endif
 
     X11_QuitXinput2(_this);
     X11_QuitModes(_this);

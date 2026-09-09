@@ -323,8 +323,7 @@ files2headers(gamepad_image_headers
 files2headers(icon_png_header icon.png)
 files2headers(glass_png_header glass.png)
 
-set(FFmpeg_FIND_COMPONENTS AVCODEC AVFORMAT AVUTIL SWSCALE)
-include("${CMAKE_CURRENT_LIST_DIR}/../cmake/FindFFmpeg.cmake")
+find_package(FFmpeg COMPONENTS AVCODEC AVFORMAT AVUTIL SWSCALE)
 if(FFmpeg_FOUND)
     cmake_push_check_state()
     list(APPEND CMAKE_REQUIRED_INCLUDES "${FFmpeg_AVUTIL_INCLUDE_DIRS}")
@@ -380,6 +379,9 @@ add_sdl_test_executable(testsymbols NONINTERACTIVE NOTRACKMEM NONINTERACTIVE_ARG
 set(build_options_dependent_tests )
 
 add_sdl_test_executable(testevdev BUILD_DEPENDENT NONINTERACTIVE SOURCES testevdev.c NAME83 evdev)
+
+add_sdl_test_executable(testdescriptor BUILD_DEPENDENT SOURCES testdescriptor.c NAME83 descriptr)
+target_compile_definitions(testdescriptor PRIVATE DEBUG_DESCRIPTOR)
 
 if(MACOS)
     add_sdl_test_executable(testnative BUILD_DEPENDENT NEEDS_RESOURCES TESTUTILS
@@ -441,6 +443,7 @@ add_sdl_test_executable(testlocale NONINTERACTIVE SOURCES testlocale.c NAME83 lo
 add_sdl_test_executable(testlock SOURCES testlock.c NAME83 lock)
 add_sdl_test_executable(testrwlock SOURCES testrwlock.c NONINTERACTIVE NONINTERACTIVE_TIMEOUT 20 NAME83 rwlock)
 add_sdl_test_executable(testmouse SOURCES testmouse.c NAME83 mouse)
+add_sdl_test_executable(testnotification NEEDS_RESOURCES SOURCES testnotification.c NAME83 notify)
 
 add_sdl_test_executable(testoverlay NEEDS_RESOURCES TESTUTILS SOURCES testoverlay.c NAME83 overlay)
 add_sdl_test_executable(testplatform NONINTERACTIVE SOURCES testplatform.c NAME83 platform)

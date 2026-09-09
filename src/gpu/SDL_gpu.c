@@ -1430,6 +1430,13 @@ SDL_GPUTransferBuffer *SDL_CreateGPUTransferBuffer(
         return NULL;
     }
 
+    if (device->debug_mode) {
+        if (createinfo->usage != SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD &&
+            createinfo->usage != SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD) {
+            SDL_assert_release(!"Invalid transfer buffer usage!");
+        }
+    }
+
     const char *debugName = SDL_GetStringProperty(createinfo->props, SDL_PROP_GPU_TRANSFERBUFFER_CREATE_NAME_STRING, NULL);
 
     return device->CreateTransferBuffer(
@@ -1549,11 +1556,11 @@ void SDL_ReleaseGPUTexture(
     SDL_GPUDevice *device,
     SDL_GPUTexture *texture)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(texture == NULL) {
+    if(texture == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseTexture(
         device->driverData,
@@ -1564,11 +1571,11 @@ void SDL_ReleaseGPUSampler(
     SDL_GPUDevice *device,
     SDL_GPUSampler *sampler)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(sampler == NULL) {
+    if(sampler == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseSampler(
         device->driverData,
@@ -1579,11 +1586,11 @@ void SDL_ReleaseGPUBuffer(
     SDL_GPUDevice *device,
     SDL_GPUBuffer *buffer)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(buffer == NULL) {
+    if(buffer == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseBuffer(
         device->driverData,
@@ -1594,11 +1601,11 @@ void SDL_ReleaseGPUTransferBuffer(
     SDL_GPUDevice *device,
     SDL_GPUTransferBuffer *transfer_buffer)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(transfer_buffer == NULL) {
+    if(transfer_buffer == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseTransferBuffer(
         device->driverData,
@@ -1609,11 +1616,11 @@ void SDL_ReleaseGPUShader(
     SDL_GPUDevice *device,
     SDL_GPUShader *shader)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(shader == NULL) {
+    if(shader == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseShader(
         device->driverData,
@@ -1624,11 +1631,11 @@ void SDL_ReleaseGPUComputePipeline(
     SDL_GPUDevice *device,
     SDL_GPUComputePipeline *compute_pipeline)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(compute_pipeline == NULL) {
+    if(compute_pipeline == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseComputePipeline(
         device->driverData,
@@ -1639,11 +1646,11 @@ void SDL_ReleaseGPUGraphicsPipeline(
     SDL_GPUDevice *device,
     SDL_GPUGraphicsPipeline *graphics_pipeline)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(graphics_pipeline == NULL) {
+    if(graphics_pipeline == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseGraphicsPipeline(
         device->driverData,
@@ -2102,6 +2109,10 @@ void SDL_BindGPUVertexSamplers(
         }
     }
 
+    if (num_bindings == 0) {
+        return;
+    }
+
     RENDERPASS_DEVICE->BindVertexSamplers(
         RENDERPASS_COMMAND_BUFFER,
         first_slot,
@@ -2207,6 +2218,10 @@ void SDL_BindGPUFragmentSamplers(
         for (Uint32 i = 0; i < num_bindings; i += 1) {
             ((RenderPass *)render_pass)->fragment_sampler_bound[first_slot + i] = true;
         }
+    }
+
+    if (num_bindings == 0) {
+        return;
     }
 
     RENDERPASS_DEVICE->BindFragmentSamplers(
@@ -3468,7 +3483,11 @@ bool SDL_WaitForGPUFences(
 {
     CHECK_DEVICE_MAGIC(device, false);
 
-    CHECK_PARAM(fences == NULL && num_fences > 0) {
+    if (!num_fences) {
+        return true;
+    }
+
+    CHECK_PARAM(fences == NULL) {
         SDL_InvalidParamError("fences");
         return false;
     }
@@ -3500,11 +3519,11 @@ void SDL_ReleaseGPUFence(
     SDL_GPUDevice *device,
     SDL_GPUFence *fence)
 {
-    CHECK_DEVICE_MAGIC(device, );
-
-    CHECK_PARAM(fence == NULL) {
+    if(fence == NULL) {
         return;
     }
+
+    CHECK_DEVICE_MAGIC(device, );
 
     device->ReleaseFence(
         device->driverData,

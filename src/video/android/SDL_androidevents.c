@@ -178,26 +178,6 @@ static void Android_OnDestroy(void)
 
 static void Android_HandleLifecycleEvent(SDL_AndroidLifecycleEvent event)
 {
-    // Make sure we're holding the joystick lock before dispatching life cycle events
-    // This prevents deadlocks of this form:
-    //   1. SDL locks the event watch list to dispatch the lifecycle event
-    //   2. a joystick sensor event arrives, taking the joystick lock
-    //   3. the lifecycle event dispatch calls into the application event
-    //      watcher, which closes joysticks, trying to take the joystick lock
-    //   4. SDL delivers the sensor event, trying lock the event watch list
-    //   5. BOOM, deadlock!
-    //
-    // There are a few solutions to this, most of which involve unlocking the
-    // event watch list while delivering events or unlocking the joystick lock
-    // while delivering joystick events, both of which reduce performance and
-    // are extremely risky, so we'll do this, which is the least risky option.
-    //
-    // If you end up needing to wait for another thread that handles joystick
-    // events in your life cycle handling, then you can simply unlock joysticks,
-    // wait for that thread to complete, and then re-lock joysticks.
-
-    SDL_LockJoysticks();
-
     switch (event) {
     case SDL_ANDROID_LIFECYCLE_WAKE:
         // Nothing to do, just return
@@ -217,8 +197,6 @@ static void Android_HandleLifecycleEvent(SDL_AndroidLifecycleEvent event)
     default:
         break;
     }
-
-    SDL_UnlockJoysticks();
 }
 
 static Sint64 GetLifecycleEventTimeout(bool paused, Sint64 timeoutNS)
@@ -284,6 +262,29 @@ bool Android_WaitActiveAndLockActivity(void)
 void Android_QuitEvents(void)
 {
     Android_EventsInitialized = false;
+}
+
+#else
+
+#include "../../core/android/SDL_android.h"
+
+void Android_InitEvents(void)
+{
+}
+
+void Android_PumpEvents(Sint64 timeoutNS)
+{
+    (void)timeoutNS;
+}
+
+bool Android_WaitActiveAndLockActivity(void)
+{
+    Android_LockActivityMutex();
+    return true;
+}
+
+void Android_QuitEvents(void)
+{
 }
 
 #endif // SDL_VIDEO_DRIVER_ANDROID

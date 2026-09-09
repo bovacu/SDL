@@ -386,6 +386,7 @@ static bool IOS_AddMFIJoystickDevice(SDL_JoystickDeviceItem *device, GCControlle
              HIDAPI_IsDevicePresent(USB_VENDOR_DRAGONRISE, USB_PRODUCT_EVORETRO_GAMECUBE_ADAPTER3, 0, ""))) ||
         (SDL_strcmp(name, "8Bitdo SN30 Pro") == 0 && (HIDAPI_IsDevicePresent(USB_VENDOR_8BITDO, USB_PRODUCT_8BITDO_SN30_PRO, 0, "") || HIDAPI_IsDevicePresent(USB_VENDOR_8BITDO, USB_PRODUCT_8BITDO_SN30_PRO_BT, 0, ""))) ||
         (SDL_strcmp(name, "8BitDo Pro 2") == 0 && (HIDAPI_IsDevicePresent(USB_VENDOR_8BITDO, USB_PRODUCT_8BITDO_PRO_2, 0, "") || HIDAPI_IsDevicePresent(USB_VENDOR_8BITDO, USB_PRODUCT_8BITDO_PRO_2_BT, 0, ""))) ||
+        (SDL_strcmp(name, "8BitDo Pro 3") == 0 && (HIDAPI_IsDevicePresent(USB_VENDOR_8BITDO, USB_PRODUCT_8BITDO_PRO_3, 0, ""))) ||
         (SDL_startswith(name, "8BitDo Ultimate 2 Wireless") && HIDAPI_IsDevicePresent(USB_VENDOR_8BITDO, USB_PRODUCT_8BITDO_ULTIMATE2_WIRELESS, 0, ""))) {
         // The HIDAPI driver is taking care of this device
         return false;
@@ -1769,6 +1770,11 @@ static bool IOS_JoystickGetGamepadMapping(int device_index, SDL_GamepadMapping *
 bool IOS_SupportedHIDDevice(IOHIDDeviceRef device)
 {
     if (!SDL_GetHintBoolean(SDL_HINT_JOYSTICK_MFI, true)) {
+        return false;
+    }
+
+    if (IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVirtualHIDevice)) == kCFBooleanTrue) {
+        // Steam virtual gamepads always have kIOHIDVirtualHIDevice property unlike real devices, and are also not supported as GCController
         return false;
     }
 
