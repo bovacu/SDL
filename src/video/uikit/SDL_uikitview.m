@@ -275,9 +275,23 @@ extern int SDL_AppleTVRemoteOpenedAsJoystick;
     }
 }
 
-- (void)pencilMoving:(UITouch *)touch
+// RDE: every hardware sample, not one per UIKit delivery. The pen samples at up
+// to 240 Hz, but UIKit calls touchesMoved at most once per display refresh, and
+// only when the run loop gets to it, passing just the NEWEST sample; the ones in
+// between are in coalescedTouchesForTouch. Reading only `touch` dropped them, so
+// fast curves came out as polygons (~37 Hz measured on a 60 Hz iPad mini 6).
+// The last coalesced touch is `touch` itself, so nothing is sent twice.
+- (void)pencilMoving:(UITouch *)touch fromEvent:(UIEvent *)event
 {
-    UIKit_HandlePenMotion(self, touch);
+    NSArray<UITouch *> *coalesced = [event coalescedTouchesForTouch:touch];
+    if (coalesced.count == 0) {
+        UIKit_HandlePenMotion(self, touch);
+        return;
+    }
+
+    for (UITouch *sample in coalesced) {
+        UIKit_HandlePenMotion(self, sample);
+    }
 }
 
 - (void)pencilPressed:(UITouch *)touch
@@ -287,6 +301,18 @@ extern int SDL_AppleTVRemoteOpenedAsJoystick;
 
 - (void)pencilReleased:(UITouch *)touch
 {
+    UIKit_HandlePenRelease(self, touch);
+}
+
+// RDE: the samples between the last delivered move and the lift, sent as motion
+// before the release — the tail of a fast flick. Same reason as pencilMoving.
+- (void)pencilReleased:(UITouch *)touch fromEvent:(UIEvent *)event
+{
+    NSArray<UITouch *> *coalesced = [event coalescedTouchesForTouch:touch];
+    for (NSUInteger i = 0; i + 1 < coalesced.count; ++i) {
+        UIKit_HandlePenMotion(self, coalesced[i]);
+    }
+
     UIKit_HandlePenRelease(self, touch);
 }
 
@@ -371,7 +397,7 @@ extern int SDL_AppleTVRemoteOpenedAsJoystick;
 #if !defined(SDL_PLATFORM_TVOS)
         if (@available(iOS 13.0, *)) {
             if (touch.type == UITouchTypePencil) {
-                [self pencilReleased:touch];
+                [self pencilReleased:touch fromEvent:event];  // RDE: coalesced tail
                 continue;
             }
         }
@@ -441,7 +467,7 @@ extern int SDL_AppleTVRemoteOpenedAsJoystick;
 #if !defined(SDL_PLATFORM_TVOS)
         if (@available(iOS 13.0, *)) {
             if (touch.type == UITouchTypePencil) {
-                [self pencilMoving:touch];
+                [self pencilMoving:touch fromEvent:event];  // RDE: coalesced samples
                 continue;
             }
         }
