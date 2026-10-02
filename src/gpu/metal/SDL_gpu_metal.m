@@ -4576,6 +4576,11 @@ static SDL_GPUDevice *METAL_CreateDevice(bool debugMode, bool preferLowPower, SD
         if (@available(iOS 13.0, tvOS 13.0, *)) {
             hasHardwareSupport = [device supportsFamily:MTLGPUFamilyApple3];
         }
+#if TARGET_OS_SIMULATOR
+        // RDE: Xcode's Simulator draws with the Mac's own GPU, which reports no
+        // Apple3 family; let it through (devices are checked as above).
+        hasHardwareSupport = true;
+#endif
 #endif
 
         if (!hasHardwareSupport) {
